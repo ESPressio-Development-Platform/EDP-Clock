@@ -10,6 +10,7 @@
 #include <ESPressio_Platform.hpp>
 
 #include "ClockComposition.hpp"
+#include "ClockCorrelation.hpp"
 #include "MonotonicTimestamp.hpp"
 #include "SynchronizationObservation.hpp"
 #include "SynchronizationObservationStatus.hpp"
@@ -758,6 +759,34 @@ namespace ESPressio::Clock {
 
         /// Total fixed atomic storage retained by the discipline ConcurrentSnapshot.
         static constexpr std::size_t ConcurrentStateStorageBytes = StateSnapshot::AtomicStorageBytes;
+
+
+        // Clock correlation.
+
+        /// Returns one immutable snapshot of the best accepted monotonic-to-reference mapping.
+        ///
+        /// Correlation uses the raw accepted reference anchor rather than the phase-slewed published
+        /// SynchronizedClock anchor. The returned value is therefore suitable for retrospectively
+        /// projecting hardware/event monotonic timestamps even while the public clock is Reacquiring.
+        ClockCorrelation Correlation() const noexcept {
+            const auto state = _state.Read();
+
+            if (state.HasObservation == 0U) return ClockCorrelation();
+
+            return Detail::ClockCorrelationFactory::Create(
+                MonotonicTimestamp::FromNanoseconds(
+                    state.MonotonicAnchorNanoseconds
+                ),
+                SynchronizedTimestamp::FromNanoseconds(
+                    state.ReferenceAnchorNanoseconds
+                ),
+                state.FrequencyCorrectionPartsPerBillion,
+                state.FrequencyUncertaintyPartsPerBillion,
+                SynchronizationUncertainty::FromNanoseconds(
+                    state.UncertaintyAtAnchorNanoseconds
+                )
+            );
+        }
 
 
         // Clock reading.

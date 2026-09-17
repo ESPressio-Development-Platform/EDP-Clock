@@ -136,5 +136,27 @@ int main() {
     if (reading.Uncertainty().Nanoseconds() >= 1000000U) return 4;
     if (reading.Timestamp().Nanoseconds() != 42000001000ULL) return 5;
 
+    // Capture one immutable reference mapping. A real radio/sensor can retain this small value and
+    // correlate delayed hardware timestamps later without repeatedly reading Clock discipline state.
+    const auto correlation = synchronizedClock.Correlation();
+
+    if (!correlation.IsAvailable()) return 6;
+
+    // An event occurs 250 us later, but application processing is intentionally delayed another 5 ms.
+    timebase.Advance(250000U);
+    const auto eventTimestamp = ESPressio::Clock::MonotonicNow();
+    timebase.Advance(5000000U);
+
+    const auto eventProjection = correlation.Correlate(
+        eventTimestamp,
+        ESPressio::Clock::SynchronizationUncertainty::FromNanoseconds(
+            100U
+        )
+    );
+
+    if (!eventProjection.IsCorrelated()) return 7;
+    if (eventProjection.Timestamp().Nanoseconds() != 42000251000ULL) return 8;
+    if (eventProjection.Uncertainty().Nanoseconds() != 951U) return 9;
+
     return 0;
 }

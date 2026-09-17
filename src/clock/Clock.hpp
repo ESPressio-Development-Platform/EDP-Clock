@@ -1,6 +1,10 @@
 #pragma once
 
 #include "ClockComposition.hpp"
+#include "ClockCorrelation.hpp"
+#include "ClockCorrelationProjection.hpp"
+#include "ClockCorrelationProjectionStatus.hpp"
+#include "ClockCorrelationState.hpp"
 #include "Delta.hpp"
 #include "Duration.hpp"
 #include "FourTimestampEstimator.hpp"

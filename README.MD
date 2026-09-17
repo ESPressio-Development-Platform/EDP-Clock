@@ -14,6 +14,9 @@ The following Clock facilities are currently provided:
 - [Synchronized Clock](./docs/SYNCHRONIZED-CLOCK.MD)  
   Derives a shared synchronized coordinate from `MonotonicClock`, reduces source-agnostic T1/T2/T3/T4 exchanges into conservative synchronization observations, performs bounded integer-only frequency/phase discipline, reports explicit uncertainty and lifecycle state, and exposes application-wide `SynchronizedNow()`.
 
+- [Clock Correlation](./docs/CLOCK-CORRELATION.MD)  
+  Captures immutable monotonic-to-reference mappings for retrospective hardware/event timestamp projection, including signed frequency correction, explicit capture uncertainty, and bounded projection quality without retaining Clock history.
+
 ## Dependencies
 
 `EDP-Clock` depends on:
@@ -45,4 +48,4 @@ Clock therefore consumes already-selected Platform concurrency requirements; Pla
 
 ## Development Status
 
-The monotonic and synchronized Clock foundations are implemented. Higher-level facilities such as Stopwatch, timers, scheduling, alarms, and human-time interpretation remain intentionally outside the current tranche.
+The monotonic and synchronized Clock foundations, four-timestamp time transfer, and immutable Clock Correlation are implemented. Higher-level facilities such as Stopwatch, timers, scheduling, alarms, and human-time interpretation remain intentionally outside the current tranche.
