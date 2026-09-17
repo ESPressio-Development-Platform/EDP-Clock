@@ -12,7 +12,7 @@ The following Clock facilities are currently provided:
   Defines the application-selected `MonotonicTimebase`, generic `MonotonicClock`, canonical nanosecond `MonotonicTimestamp`, signed `Duration`, `Delta()` arithmetic, and application-wide `MonotonicNow()` convenience surface.
 
 - [Synchronized Clock](./docs/SYNCHRONIZED-CLOCK.MD)  
-  Derives a shared synchronized coordinate from `MonotonicClock`, accepts source-agnostic synchronization observations, performs bounded integer-only frequency/phase discipline, reports explicit uncertainty and lifecycle state, and exposes application-wide `SynchronizedNow()`.
+  Derives a shared synchronized coordinate from `MonotonicClock`, reduces source-agnostic T1/T2/T3/T4 exchanges into conservative synchronization observations, performs bounded integer-only frequency/phase discipline, reports explicit uncertainty and lifecycle state, and exposes application-wide `SynchronizedNow()`.
 
 ## Dependencies
 

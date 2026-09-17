@@ -8,14 +8,16 @@
 4. [Public Types](#public-types)
 5. [Synchronization State](#synchronization-state)
 6. [Synchronization Observations](#synchronization-observations)
-7. [Discipline Behaviour](#discipline-behaviour)
-8. [Uncertainty](#uncertainty)
-9. [Concurrency](#concurrency)
-10. [Composition and Bootstrap](#composition-and-bootstrap)
-11. [Memory Model](#memory-model)
-12. [Source and Transport Separation](#source-and-transport-separation)
-13. [Example](#example)
-14. [Summary](#summary)
+7. [Four-Timestamp Time Transfer](#four-timestamp-time-transfer)
+8. [Discipline Behaviour](#discipline-behaviour)
+9. [Uncertainty](#uncertainty)
+10. [Concurrency](#concurrency)
+11. [SynchronizedNow](#synchronizednow)
+12. [Composition and Bootstrap](#composition-and-bootstrap)
+13. [Memory Model](#memory-model)
+14. [Source and Transport Separation](#source-and-transport-separation)
+15. [Example](#example)
+16. [Summary](#summary)
 
 ---
 
@@ -51,6 +53,9 @@ SynchronizationUncertainty
 SynchronizationState
 SynchronizedReading
 SynchronizationObservation
+FourTimestampExchange
+EstimateFourTimestampExchange()
+time-transfer admission
 observation admission
 frequency correction
 phase slew
@@ -202,11 +207,81 @@ Semantically:
 
 Clock therefore does not need to know whether the evidence came from a Mesh peer, GNSS, an RTC-derived reference, a network exchange, a wired reference, a host processor, or another future source.
 
-A transport-specific mechanism may perform richer mathematics first—for example a four-timestamp exchange—and submit the resulting estimate and uncertainty to Clock.
+For transport mechanisms capable of request/response timestamp exchange, `EDP-Clock` also owns the generic four-timestamp reduction that produces this observation. Transport code captures and carries T1/T2/T3/T4; it does not need to reimplement the Clock mathematics.
 
 `Observe()` returns an explicit `SynchronizationObservationStatus`. Observations can be rejected when their local monotonic coordinate regresses, their inferred rate exceeds policy, arithmetic cannot be represented safely, or the timing relationship is inconsistent with the retained mapping.
 
 Clock does not silently clamp invalid evidence and present it as healthy.
+
+---
+
+## Four-Timestamp Time Transfer
+
+`FourTimestampExchange` represents one source-agnostic request/response exchange:
+
+```text
+T1  local MonotonicTimestamp      request transmitted
+T2  remote SynchronizedTimestamp request received
+T3  remote SynchronizedTimestamp response transmitted
+T4  local MonotonicTimestamp      response received
+```
+
+Each timestamp carries a separate conservative `SynchronizationUncertainty` bound. Transport implementations should capture the timestamps as close as practical to the physical transmit/receive boundary and supply any additional capture/reference uncertainty they know about.
+
+The important type distinction is deliberate: **T1 and T4 are local monotonic coordinates, not local synchronized timestamps**. The local node can therefore perform a four-timestamp exchange while its own `SynchronizedClock` is still `NeverSynchronized`. T2 and T3 belong to the remote/reference synchronized coordinate.
+
+### Reduction mathematics
+
+Clock never directly subtracts timestamps belonging to different coordinate domains. Instead it calculates same-domain intervals:
+
+```text
+localElapsed       = T4 - T1
+remoteTurnaround   = T3 - T2
+pathRoundTrip      = localElapsed - remoteTurnaround
+estimatedReturn    = floor(pathRoundTrip / 2)
+referenceAtT4      = T3 + estimatedReturn
+```
+
+This is the useful four-timestamp relationship expressed without requiring a pre-existing local synchronized epoch. `referenceAtT4` becomes the `ReferenceTimestamp` in a `SynchronizationObservation` whose `LocalTimestamp` is T4.
+
+An exchange is rejected when:
+
+```text
+T4 < T1
+T3 < T2
+remoteTurnaround > localElapsed
+T3 + estimatedReturn cannot be represented
+```
+
+The corresponding `FourTimestampExchangeStatus` makes the rejection reason explicit.
+
+### Path asymmetry and uncertainty
+
+The midpoint estimate is **not** presented as perfect simply because the arithmetic assumes a midpoint. Without stronger transport-specific knowledge, the forward and reverse path delays may be asymmetric. Clock therefore adds:
+
+```text
+ceil(pathRoundTrip / 2)
+```
+
+as a conservative path-asymmetry uncertainty bound. It then adds the four supplied timestamp/capture uncertainty bounds. The public 32-bit uncertainty saturates rather than wraps.
+
+Consequently a transport with several milliseconds of unresolved path delay may produce a mathematically valid observation that still cannot satisfy the strict `< 1 ms` `Synchronized` contract. That is intentional: Clock reports the quality the evidence can justify.
+
+The estimator is used as:
+
+```cpp
+const auto estimate = ESPressio::Clock::EstimateFourTimestampExchange(
+    exchange
+);
+
+if (estimate.IsAccepted()) {
+    synchronizedClock.Observe(
+        estimate.Observation()
+    );
+}
+```
+
+`FourTimestampExchangeResult::RoundTripPathDelayNanoseconds()` also exposes the derived aggregate transport path delay for diagnostics or higher-level source-selection policy.
 
 ---
 
@@ -404,6 +479,8 @@ The synchronized implementation is fixed-size and heap-free.
 | `SynchronizedTimestamp` | 8 bytes |
 | `SynchronizationUncertainty` | 4 bytes |
 | `SynchronizedReading` | 16 bytes |
+| `FourTimestampExchange` | 48 bytes |
+| `FourTimestampExchangeResult` | 40 bytes |
 
 The logical mutable discipline state is exactly:
 
@@ -432,20 +509,27 @@ No dynamic allocation is performed by Synchronized Clock.
 Clock does not choose which synchronization source is authoritative.
 
 ```text
-Mesh -----------+
-GNSS -----------+
-RTC ------------+--> source selection / observation math
-Network --------+                 |
-Other ----------+                 v
-                           SynchronizationObservation
-                                      |
-                                      v
-                              SynchronizedClock
+Mesh / Radio / Network transport
+        |
+        | captures and carries T1/T2/T3/T4
+        v
+FourTimestampExchange
+        |
+        | EDP-Clock time-transfer mathematics
+        v
+SynchronizationObservation
+        |
+        +------------------------------+
+                                       |
+GNSS / RTC / direct reference --------+--> source selection / accepted observations
+                                       |
+                                       v
+                               SynchronizedClock
 ```
 
-The upstream layer decides which source to trust, when to switch source, whether to combine sources, and how transport delay/jitter contributes to uncertainty.
+The transport owns timestamp acquisition and carriage. For four-timestamp transports, Clock owns the generic per-exchange delay/asymmetry mathematics and converts the exchange into a `SynchronizationObservation`. Direct references such as GNSS or RTC-derived sources may produce observations without a four-timestamp exchange.
 
-Clock decides whether an observation is temporally/rate admissible, how phase/rate are disciplined, how uncertainty evolves, and what lifecycle state consumers observe.
+The upstream source-selection layer decides which source or accepted estimate to trust, when to switch source, and whether/how to combine multiple observations. Clock decides how an individual four-timestamp exchange is reduced, whether an observation is temporally/rate admissible, how phase/rate are disciplined, how uncertainty evolves, and what lifecycle state consumers observe.
 
 This separation allows future Mesh, Radio, RTC and networking implementations to evolve independently from Clock discipline internals.
 
@@ -478,17 +562,30 @@ ESPressio::Clock::BindSynchronizedClock(
 );
 ```
 
-When an upstream synchronization mechanism has an accepted estimate:
+A request/response transport can submit a complete four-timestamp exchange:
 
 ```cpp
-synchronized.Observe(
-    ESPressio::Clock::SynchronizationObservation(
-        localCapture,
-        referenceTimestamp,
-        referenceUncertainty
+const auto estimate = ESPressio::Clock::EstimateFourTimestampExchange(
+    ESPressio::Clock::FourTimestampExchange(
+        t1,
+        t1Uncertainty,
+        t2,
+        t2Uncertainty,
+        t3,
+        t3Uncertainty,
+        t4,
+        t4Uncertainty
     )
 );
+
+if (estimate.IsAccepted()) {
+    synchronized.Observe(
+        estimate.Observation()
+    );
+}
 ```
+
+A direct source that already has a defensible local/reference relationship may still construct `SynchronizationObservation` directly; four-timestamp exchange is not mandatory for sources that do not use request/response transfer.
 
 Consumers can then use:
 
@@ -510,9 +607,14 @@ The synchronized Clock foundation provides:
 one physical MonotonicClock
         |
         v
-source-agnostic observations
+transport T1/T2/T3/T4 exchanges
         |
         v
+Clock-owned time-transfer estimator
+        |
+        +--> source-agnostic observations <--- direct references
+                                      |
+                                      v
 integer-only frequency discipline
         |
         v
@@ -537,4 +639,4 @@ SynchronizedNow()
 
 Default policy is strict sub-millisecond synchronization (`uncertainty < 1 ms`), ±1,000 ppm long-term correction, and ±5,000 ppm temporary phase slew.
 
-The implementation remains source-agnostic, transport-agnostic, calendar-agnostic, heap-free, and safe for concurrent readers under the single-writer discipline contract.
+The implementation remains source-agnostic, transport-agnostic in its mathematics, calendar-agnostic, heap-free, and safe for concurrent readers under the single-writer discipline contract. Transport libraries acquire/carry timestamps; they do not own duplicate Clock discipline or four-timestamp reduction algorithms.

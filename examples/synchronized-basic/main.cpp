@@ -78,35 +78,63 @@ int main() {
         synchronizedClock
     );
 
-    // A synchronization source/transport would normally capture this local timestamp as close as
-    // possible to the physical observation event, then calculate reference time and uncertainty.
+    // T1 is captured locally as close as possible to request transmission.
     timebase.Advance(1000000000ULL);
-    const auto localCapture = ESPressio::Clock::MonotonicNow();
+    const auto t1 = ESPressio::Clock::MonotonicNow();
 
-    const auto observation = ESPressio::Clock::SynchronizationObservation(
-        localCapture,
-        ESPressio::Clock::SynchronizedTimestamp::FromNanoseconds(
-            42000000000ULL
-        ),
+    // The transport carries remote/reference T2 and T3 timestamps back with the response. In this
+    // deterministic example, the request takes 400 ns to reach the remote reference, the remote
+    // system retains it for 200 ns, and the response takes 400 ns to return.
+    const auto t2 = ESPressio::Clock::SynchronizedTimestamp::FromNanoseconds(
+        42000000400ULL
+    );
+    const auto t3 = ESPressio::Clock::SynchronizedTimestamp::FromNanoseconds(
+        42000000600ULL
+    );
+
+    // T4 is captured locally as close as possible to response reception.
+    timebase.Advance(1000U);
+    const auto t4 = ESPressio::Clock::MonotonicNow();
+
+    const auto exchange = ESPressio::Clock::FourTimestampExchange(
+        t1,
         ESPressio::Clock::SynchronizationUncertainty::FromNanoseconds(
-            250U
+            50U
+        ),
+        t2,
+        ESPressio::Clock::SynchronizationUncertainty::FromNanoseconds(
+            50U
+        ),
+        t3,
+        ESPressio::Clock::SynchronizationUncertainty::FromNanoseconds(
+            50U
+        ),
+        t4,
+        ESPressio::Clock::SynchronizationUncertainty::FromNanoseconds(
+            50U
         )
     );
 
+    const auto estimate = ESPressio::Clock::EstimateFourTimestampExchange(
+        exchange
+    );
+
+    if (!estimate.IsAccepted()) return 1;
+
     if (
         synchronizedClock.Observe(
-            observation
+            estimate.Observation()
         ) != ESPressio::Clock::SynchronizationObservationStatus::Accepted
     ) {
-        return 1;
+        return 2;
     }
 
     // Every consumer gets the synchronized coordinate together with its quality information.
     const auto reading = ESPressio::Clock::SynchronizedNow();
 
-    if (reading.State() != ESPressio::Clock::SynchronizationState::Synchronized) return 2;
-    if (reading.Uncertainty().Nanoseconds() >= 1000000U) return 3;
-    if (reading.Timestamp().Nanoseconds() != 42000000000ULL) return 4;
+    if (reading.State() != ESPressio::Clock::SynchronizationState::Synchronized) return 3;
+    if (reading.Uncertainty().Nanoseconds() >= 1000000U) return 4;
+    if (reading.Timestamp().Nanoseconds() != 42000001000ULL) return 5;
 
     return 0;
 }
