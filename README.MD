@@ -17,6 +17,9 @@ The following Clock facilities are currently provided:
 - [Clock Correlation](./docs/CLOCK-CORRELATION.MD)  
   Captures immutable monotonic-to-reference mappings for retrospective hardware/event timestamp projection, including signed frequency correction, explicit capture uncertainty, and bounded projection quality without retaining Clock history.
 
+- [Stopwatch](./docs/STOPWATCH.MD)  
+  Measures non-negative elapsed physical time from an application-selected `MonotonicClock`, with start/resume, stop, reset, restart, deterministic saturation, and no dependency on synchronization or scheduling facilities.
+
 ## Dependencies
 
 `EDP-Clock` depends on:
@@ -48,4 +51,4 @@ Clock therefore consumes already-selected Platform concurrency requirements; Pla
 
 ## Development Status
 
-The monotonic and synchronized Clock foundations, four-timestamp time transfer, and immutable Clock Correlation are implemented. Higher-level facilities such as Stopwatch, timers, scheduling, alarms, and human-time interpretation remain intentionally outside the current tranche.
+The monotonic and synchronized Clock foundations, four-timestamp time transfer, immutable Clock Correlation, and Stopwatch are implemented. Timers, scheduling, alarms, RTC-device semantics, and human-time interpretation remain intentionally outside the current Clock foundation.

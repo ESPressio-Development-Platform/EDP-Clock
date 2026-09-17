@@ -15,6 +15,7 @@
 #include "MonotonicNow.hpp"
 #include "MonotonicTimebaseProvider.hpp"
 #include "MonotonicTimestamp.hpp"
+#include "Stopwatch.hpp"
 #include "SynchronizationObservation.hpp"
 #include "SynchronizationObservationStatus.hpp"
 #include "SynchronizationState.hpp"

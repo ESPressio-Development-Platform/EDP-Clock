@@ -1,7 +1,7 @@
 {
   "name": "EDP-Clock",
-  "description": "Monotonic and synchronized clocks, time-transfer estimation, discipline and correlation for the ESPressio Development Platform",
-  "keywords": "espressio,clock,monotonic,synchronization,discipline,time-transfer,correlation,embedded",
+  "description": "Monotonic and synchronized clocks, stopwatch measurement, time-transfer estimation, discipline and correlation for the ESPressio Development Platform",
+  "keywords": "espressio,clock,monotonic,stopwatch,synchronization,discipline,time-transfer,correlation,embedded",
   "homepage": "https://espressio.org",
   "authors": {
     "name": "Simon J. Stuart",
