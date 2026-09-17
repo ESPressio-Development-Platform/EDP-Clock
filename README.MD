@@ -22,13 +22,30 @@ The following Clock facilities are currently provided:
 
 ## Dependencies
 
-`EDP-Clock` depends on:
+```text
+EDP-Clock
+├── EDP-System [mandatory]
+└── EDP-Platform [mandatory]
+    └── EDP-System [mandatory, transitive]
+```
 
-- `EDP-System` for the Composition Framework;
-- `EDP-Platform` for the lock-free `AtomicWord32` contract and generic fixed-storage `ConcurrentSnapshot` used by synchronized-clock discipline state;
-- standard C++ fixed-width integer/type facilities.
+`EDP-Clock` currently has no optional ESPressio library dependencies.
 
-`EDP-Clock` contains no Arduino, ESP-IDF, FreeRTOS, RTC, operating-system, hardware-driver, or transport-specific synchronization implementation. Concrete `AtomicWord32` providers live in the appropriate `EDP-Platform-*` repository; concrete monotonic timebases and synchronization transports remain separately owned by their appropriate platform/domain libraries or the consuming application.
+A consuming application that instantiates `SynchronizedClockProvider` must select a concrete `AtomicWord32` provider through Composition. That provider is an application capability satisfier rather than a direct or optional dependency of `EDP-Clock`.
+
+See [DEPENDENCY_GRAPH.MD](./DEPENDENCY_GRAPH.MD) for the maintained dependency graph and target-provider selection notes.
+
+## Demos
+
+Buildable demonstrations are provided under [`./demos`](./demos) for:
+
+- `monotonic-clock-basic`;
+- `synchronized-clock-basic`;
+- `four-timestamp-estimator-basic`;
+- `clock-correlation-basic`;
+- `stopwatch-basic`.
+
+Each demo contains Arduino IDE, PlatformIO Arduino, and PlatformIO ESP-IDF targets. Synchronized Clock and Clock Correlation use the target-appropriate concrete `AtomicWord32` provider.
 
 ## Bootstrap Order
 
