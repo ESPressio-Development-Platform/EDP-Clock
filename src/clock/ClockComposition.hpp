@@ -35,4 +35,20 @@ namespace ESPressio::Clock {
     /// Conservative whole-nanosecond resolution of the MonotonicClock capability.
     struct ClockResolutionNanoseconds final : Framework::Property<MonotonicClock, std::uint64_t> {};
 
+
+    /// Exclusive capability supplying source-disciplined synchronized clock readings.
+    struct SynchronizedClock final : Framework::ExclusiveCapability<Domain> {};
+
+
+    /// Exclusive upper uncertainty bound below which SynchronizedClock may report Synchronized.
+    struct SynchronizedClockUncertaintyLimitNanoseconds final : Framework::Property<SynchronizedClock, std::uint32_t> {};
+
+
+    /// Maximum absolute long-term frequency correction applied by SynchronizedClock, in ppb.
+    struct SynchronizedClockMaximumFrequencyCorrectionPartsPerBillion final : Framework::Property<SynchronizedClock, std::uint32_t> {};
+
+
+    /// Maximum absolute temporary phase slew applied by SynchronizedClock, in ppb.
+    struct SynchronizedClockMaximumPhaseSlewPartsPerBillion final : Framework::Property<SynchronizedClock, std::uint32_t> {};
+
 } // ESPressio::Clock

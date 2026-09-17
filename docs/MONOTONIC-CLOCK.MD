@@ -21,9 +21,9 @@
 17. [Hard-Coded Equivalent and Coupling](#hard-coded-equivalent-and-coupling)
 18. [Complete Example](#complete-example)
 19. [Memory Model](#memory-model)
-20. [Future Platform and RTC Integration](#future-platform-and-rtc-integration)
+20. [Platform and RTC Integration](#platform-and-rtc-integration)
 21. [What This Tranche Does Not Contain](#what-this-tranche-does-not-contain)
-22. [Future Synchronized Clock Vocabulary](#future-synchronized-clock-vocabulary)
+22. [Relationship to Synchronized Clock](#relationship-to-synchronized-clock)
 23. [Common Mistakes](#common-mistakes)
 
 ---
@@ -41,7 +41,7 @@ It answers four basic questions:
 
 The design is intentionally small because Clock reads are expected to be frequent and ESPressio targets include devices with extremely constrained DRAM.
 
-This first tranche contains only facilities whose semantics should remain stable regardless of how later synchronized time, Stopwatch, timers, schedulers, or discipline algorithms are designed.
+This first tranche contains only facilities whose semantics should remain stable regardless of how synchronized time, Stopwatch, timers, schedulers, or discipline algorithms are layered above it.
 
 ---
 
@@ -61,7 +61,7 @@ nanoseconds
 duration
 monotonicity
 resolution
-clock synchronization quality (later tranche)
+clock synchronization quality (provided by the synchronized-clock layer)
 ```
 
 It deliberately does not know about:
@@ -119,7 +119,7 @@ std::chrono
 
 Those facilities may be used by a concrete provider in another library, but they are not Clock-domain dependencies.
 
-This means `EDP-Clock` can exist before `EDP-Platform` or any specific hardware implementation.
+The monotonic facility itself requires no Platform concurrency primitive. The current `EDP-Clock` repository also contains `SynchronizedClock`, which consumes `EDP-Platform` for coherent lock-free discipline-state publication; no platform-specific SDK is exposed to the monotonic layer.
 
 ---
 
@@ -582,7 +582,7 @@ The exact timestamp conversion still uses the rational source frequency. The res
 
 This property is important for later Clock capabilities.
 
-For example, the future synchronized-clock design can express its strict sub-millisecond source requirement using a Composition constraint equivalent to:
+The synchronized-clock provider uses this property to enforce its strict sub-millisecond source requirement with a Composition constraint equivalent to:
 
 ```cpp
 LessThan<
@@ -961,14 +961,17 @@ Concrete timebase providers may require their own minimal hardware/concurrency s
 
 ---
 
-## Future Platform and RTC Integration
+## Platform and RTC Integration
 
 `EDP-Clock` deliberately knows nothing about RTC semantics or platform timer APIs.
 
-A future dependency direction may look like:
+The current dependency direction is deliberately layered:
 
 ```text
 EDP-System
+    ^
+    |
+EDP-Platform
     ^
     |
 EDP-Clock
@@ -976,10 +979,8 @@ EDP-Clock
     |
     +-----------------------+
     |                       |
-EDP-Platform            EDP-RTC
-    |                       |
-concrete MCU timer      concrete RTC/hardware implementation
-provider                capable of providing a Clock timebase
+concrete timebase       future EDP-RTC / other source library
+provider                may satisfy Clock-facing source contracts
 ```
 
 The important point is not the eventual repository names.
@@ -1004,15 +1005,10 @@ It does not know that the source is an RTC.
 
 ## What This Tranche Does Not Contain
 
-The first tranche intentionally does not implement:
+The monotonic tranche intentionally does not itself implement:
 
 ```text
-SynchronizedClock
-SynchronizedTimestamp
-SynchronizedReading
-SynchronizedNow()
-clock discipline
-synchronization transport observations
+synchronized clock discipline
 Stopwatch
 Timer
 TimerScheduler
@@ -1022,13 +1018,13 @@ RTC semantics
 platform timer implementations
 ```
 
-Those facilities will be designed on top of the stable foundation rather than allowed to reshape it retrospectively.
+`SynchronizedClock` is now implemented as a separate layer on top of this stable monotonic foundation. It consumes `MonotonicClock` rather than changing the semantics of `MonotonicTimebase`, `MonotonicTimestamp`, `Duration`, or `Delta()`.
 
 ---
 
-## Future Synchronized Clock Vocabulary
+## Relationship to Synchronized Clock
 
-The following vocabulary is reserved conceptually for the later synchronized-clock tranche:
+The implemented synchronized layer builds directly upon the contracts defined here:
 
 ```cpp
 SynchronizedClock
@@ -1037,23 +1033,29 @@ SynchronizedReading
 SynchronizedNow()
 ```
 
-The intended distinction is:
+The distinction remains deliberately explicit:
 
 ```text
 MonotonicNow()
     -> immediate local monotonic coordinate
 
 SynchronizedNow()
-    -> synchronized coordinate together with synchronization quality/uncertainty
+    -> shared synchronized coordinate together with uncertainty and lifecycle state
 ```
 
-A synchronized reading will not be treated as human wall-clock/date-time information.
+`SynchronizedClock` maintains no second physical counter. It projects the same `MonotonicClock` through an observation-driven frequency/phase mapping and publishes that mapping through `EDP-Platform::Concurrency::ConcurrentSnapshot`.
 
-It remains a physical Clock-domain coordinate.
+A synchronized reading is still not human wall-clock/date-time information. It remains a physical Clock-domain coordinate with a shared but opaque epoch.
 
-The later design must also preserve the already-agreed invariant that a Clock may only claim synchronized status when estimated uncertainty is **strictly less than 1,000,000 nanoseconds**, while retaining the highest precision available from the selected source and synchronization mechanism.
+The hard quality invariant is:
 
-No synchronized-time state or implementation is included in this tranche.
+```text
+State == Synchronized
+    implies
+Uncertainty < 1,000,000 nanoseconds
+```
+
+See [SYNCHRONIZED-CLOCK.MD](./SYNCHRONIZED-CLOCK.MD) for the complete discipline, lifecycle, concurrency, and memory model.
 
 ---
 
@@ -1102,9 +1104,9 @@ A timebase provider must hide raw rollover before exposing `CurrentCount()`.
 
 The concrete provider is responsible for coherent concurrent acquisition.
 
-### Putting platform synchronization primitives in EDP-Clock
+### Putting platform-specific synchronization primitives in EDP-Clock
 
-Platform-specific critical sections, atomics, timer APIs, and ISR details belong in the concrete timebase implementation.
+`SynchronizedClock` consumes the generic `EDP-Platform::Concurrency::ConcurrentSnapshot` abstraction. Platform-specific critical sections, SDK atomics, timer APIs, and ISR details still do not belong in `EDP-Clock`; concrete `AtomicWord32` mechanics stay in the appropriate `EDP-Platform-*` provider.
 
 ### Rebinding MonotonicNow at runtime
 
@@ -1139,4 +1141,4 @@ generic MonotonicClock
 application-wide MonotonicNow()
 ```
 
-The design preserves exact source frequency, avoids cumulative rounding drift, keeps platform dependencies outside Clock, makes the physical timebase an application-level decision, and adds no unnecessary dynamic memory or synchronization machinery to the Clock abstraction itself.
+The design preserves exact source frequency, avoids cumulative rounding drift, keeps platform-specific mechanisms outside the monotonic abstraction, makes the physical timebase an application-level decision, and adds no unnecessary dynamic memory or synchronization machinery to the monotonic read path.

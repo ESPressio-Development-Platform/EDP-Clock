@@ -11,12 +11,38 @@ The following Clock facilities are currently provided:
 - [Monotonic Clock Foundation](./docs/MONOTONIC-CLOCK.MD)  
   Defines the application-selected `MonotonicTimebase`, generic `MonotonicClock`, canonical nanosecond `MonotonicTimestamp`, signed `Duration`, `Delta()` arithmetic, and application-wide `MonotonicNow()` convenience surface.
 
+- [Synchronized Clock](./docs/SYNCHRONIZED-CLOCK.MD)  
+  Derives a shared synchronized coordinate from `MonotonicClock`, accepts source-agnostic synchronization observations, performs bounded integer-only frequency/phase discipline, reports explicit uncertainty and lifecycle state, and exposes application-wide `SynchronizedNow()`.
+
 ## Dependencies
 
-The Clock foundation depends only on the `EDP-System` Composition Framework and standard C++ fixed-width integer/type facilities.
+`EDP-Clock` depends on:
 
-It has no Arduino, ESP-IDF, FreeRTOS, RTC, operating-system, hardware-driver, or other platform-specific dependency. Concrete timebase providers belong in the appropriate platform, hardware, RTC, or application library.
+- `EDP-System` for the Composition Framework;
+- `EDP-Platform` for the lock-free `AtomicWord32` contract and generic fixed-storage `ConcurrentSnapshot` used by synchronized-clock discipline state;
+- standard C++ fixed-width integer/type facilities.
+
+`EDP-Clock` contains no Arduino, ESP-IDF, FreeRTOS, RTC, operating-system, hardware-driver, or transport-specific synchronization implementation. Concrete `AtomicWord32` providers live in the appropriate `EDP-Platform-*` repository; concrete monotonic timebases and synchronization transports remain separately owned by their appropriate platform/domain libraries or the consuming application.
+
+## Bootstrap Order
+
+The intended initialization order is:
+
+```text
+System Identity
+    |
+    v
+Platform Requirements
+    |
+    v
+Clock
+    |
+    v
+everything else
+```
+
+Clock therefore consumes already-selected Platform concurrency requirements; Platform does not depend on Clock.
 
 ## Development Status
 
-`EDP-Clock` is being rebuilt progressively from a clean foundation. Higher-level facilities such as synchronized time, Stopwatch, timers, scheduling, and clock discipline will be introduced only after their lower-level Clock contracts have been designed and validated.
+The monotonic and synchronized Clock foundations are implemented. Higher-level facilities such as Stopwatch, timers, scheduling, alarms, and human-time interpretation remain intentionally outside the current tranche.
