@@ -69,3 +69,9 @@ Clock therefore consumes already-selected Platform concurrency requirements; Pla
 ## Development Status
 
 The monotonic and synchronized Clock foundations, four-timestamp time transfer, immutable Clock Correlation, and Stopwatch are implemented. Timers, scheduling, alarms, RTC-device semantics, and human-time interpretation remain intentionally outside the current Clock foundation.
+
+## C++ Language Baseline
+
+ESPressio requires C++20. For PlatformIO-compatible ESP32 development, PIOArduino is the recommended platform baseline because it tracks a current Arduino-ESP32/ESP-IDF toolchain. Stock PlatformIO Core/IDE may still be used when the project explicitly selects the PIOArduino platform package and compiles as C++20.
+
+See the EDP-System [C++20 Toolchain Baseline](https://github.com/ESPressio-Development-Platform/EDP-System/blob/main/docs/CPP20-TOOLCHAIN.MD) for the canonical configuration.
