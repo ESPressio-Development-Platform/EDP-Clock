@@ -106,6 +106,21 @@ namespace ESPressio::Clock::Tests::Monotonic {
     >;
 
 
+    /// Exactly-one same-domain requirement for the test MonotonicTimebase.
+    using TestTimebaseRequirement = Framework::Requirement<
+        MonotonicTimebase,
+        Framework::RequirementScope::SameDomain,
+        Framework::ExactlyProviders<1U>
+    >;
+
+    /// Exactly-one same-domain requirement for the test MonotonicClock.
+    using TestClockRequirement = Framework::Requirement<
+        MonotonicClock,
+        Framework::RequirementScope::SameDomain,
+        Framework::ExactlyProviders<1U>
+    >;
+
+
     static_assert(
         sizeof(MonotonicTimestamp) == 8U,
         "MonotonicTimestamp must occupy exactly eight bytes"
@@ -151,7 +166,10 @@ namespace ESPressio::Clock::Tests::Monotonic {
 
     static_assert(
         std::is_same_v<
-            TestComposition::ProviderFor<MonotonicTimebase>,
+            TestComposition::Select<
+                TestTimebaseRequirement,
+                Framework::SelectUnique
+            >,
             TestTimebase
         >,
         "Expected TestTimebase to resolve as the MonotonicTimebase provider"
@@ -159,7 +177,10 @@ namespace ESPressio::Clock::Tests::Monotonic {
 
     static_assert(
         std::is_same_v<
-            TestComposition::ProviderFor<MonotonicClock>,
+            TestComposition::Select<
+                TestClockRequirement,
+                Framework::SelectUnique
+            >,
             TestClock
         >,
         "Expected TestClock to resolve as the MonotonicClock provider"

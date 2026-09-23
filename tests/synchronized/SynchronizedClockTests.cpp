@@ -18,7 +18,7 @@ namespace {
     /// Host-test concrete provider for the Platform AtomicWord32 capability.
     class TestAtomicWord32Provider final : public Framework::Provider<
         ESPressio::Platform::Domain,
-        Framework::Provides<
+        Framework::Offers<
             Framework::Offer<
                 ESPressio::Platform::Concurrency::AtomicWord32,
                 Framework::PropertyValue<ESPressio::Platform::Concurrency::LockFree, true>,
@@ -185,6 +185,26 @@ namespace {
         TestAtomicWord32Provider
     >;
 
+    /// Platform Composition satisfying the synchronized clock's external atomic-word Requirement.
+    using PlatformComposition = Framework::Composition<
+        ESPressio::Platform::Domain,
+        TestAtomicWord32Provider
+    >;
+
+    /// Clock Composition satisfying the synchronized clock's same-domain MonotonicClock Requirement.
+    using ClockComposition = Framework::Composition<
+        ESPressio::Clock::Domain,
+        TestTimebase,
+        MonotonicClock,
+        SynchronizedClock
+    >;
+
+    /// Complete test Architecture proving both Clock and Platform Contract relationships.
+    using TestArchitecture = Framework::Architecture<
+        PlatformComposition,
+        ClockComposition
+    >;
+
 
     /// Creates an observation at the supplied monotonic/reference coordinates.
     ESPressio::Clock::SynchronizationObservation Observation(
@@ -272,16 +292,20 @@ int main() {
     );
 
     // Composition and fixed-memory policy metadata.
+    static_assert(
+        TestArchitecture::IsValid,
+        "Synchronized Clock Architecture must satisfy both same-domain and external Requirements"
+    );
     static_assert(SynchronizedClock::SynchronizationUncertaintyLimitNanoseconds == 1000000U);
     static_assert(SynchronizedClock::MaximumFrequencyCorrectionPartsPerBillion == 1000000U);
     static_assert(SynchronizedClock::MaximumPhaseSlewPartsPerBillion == 5000000U);
     static_assert(SynchronizedClock::DisciplineStateBytes == 48U);
     static_assert(SynchronizedClock::ConcurrentStateStorageBytes == 104U);
     static_assert(
-        SynchronizedClock::CompositionCapabilities::template Contains<ESPressio::Clock::SynchronizedClock>
+        SynchronizedClock::CompositionOffers::template Contains<ESPressio::Clock::SynchronizedClock>
     );
     using SynchronizedProperties =
-        typename SynchronizedClock::CompositionCapabilities::template PropertiesFor<ESPressio::Clock::SynchronizedClock>;
+        typename SynchronizedClock::CompositionOffers::template PropertiesFor<ESPressio::Clock::SynchronizedClock>;
     static_assert(
         SynchronizedProperties::template Value<ESPressio::Clock::SynchronizedClockUncertaintyLimitNanoseconds> == 1000000U
     );

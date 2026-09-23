@@ -28,14 +28,14 @@ namespace ESPressio::Clock {
         struct SynchronizedMonotonicClockTraits {
 
             static_assert(
-                TMonotonicClockProvider::CompositionCapabilities::template Contains<MonotonicClock>,
+                TMonotonicClockProvider::CompositionOffers::template Contains<MonotonicClock>,
                 "SynchronizedClockProvider requires a provider that supplies MonotonicClock"
             );
 
             // Monotonic-clock metadata.
 
             /// Properties advertised by the selected MonotonicClock provider.
-            using Properties = typename TMonotonicClockProvider::CompositionCapabilities::template PropertiesFor<MonotonicClock>;
+            using Properties = typename TMonotonicClockProvider::CompositionOffers::template PropertiesFor<MonotonicClock>;
 
             static_assert(
                 Properties::template Contains<ClockResolutionNanoseconds>,
@@ -434,7 +434,7 @@ namespace ESPressio::Clock {
     >
     class SynchronizedClockProvider final : public Framework::Provider<
         Domain,
-        Framework::Provides<
+        Framework::Offers<
             Framework::Offer<
                 SynchronizedClock,
                 Framework::PropertyValue<
@@ -451,12 +451,27 @@ namespace ESPressio::Clock {
                 >
             >
         >,
-        Framework::Requires<
-            Framework::Need<
+        Framework::Contract<
+            Framework::Requirement<
                 MonotonicClock,
+                Framework::RequirementScope::SameDomain,
+                Framework::ExactlyProviders<1U>,
                 Framework::LessThan<
                     ClockResolutionNanoseconds,
                     TSynchronizationUncertaintyLimitNanoseconds
+                >
+            >,
+            Framework::Requirement<
+                ESPressio::Platform::Concurrency::AtomicWord32,
+                Framework::RequirementScope::ExternalDomain,
+                Framework::ExactlyProviders<1U>,
+                Framework::Equals<
+                    ESPressio::Platform::Concurrency::LockFree,
+                    true
+                >,
+                Framework::Equals<
+                    ESPressio::Platform::Concurrency::AtomicWordStorageBytes,
+                    sizeof(std::uint32_t)
                 >
             >
         >

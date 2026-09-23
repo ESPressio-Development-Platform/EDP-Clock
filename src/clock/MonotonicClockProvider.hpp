@@ -17,7 +17,7 @@ namespace ESPressio::Clock {
         struct MonotonicTimebaseTraits {
 
             static_assert(
-                TTimebaseProvider::CompositionCapabilities::template Contains<MonotonicTimebase>,
+                TTimebaseProvider::CompositionOffers::template Contains<MonotonicTimebase>,
                 "MonotonicClockProvider requires a provider that supplies MonotonicTimebase"
             );
 
@@ -25,7 +25,7 @@ namespace ESPressio::Clock {
 
             /// Compile-time property set advertised by the selected timebase provider.
             using Properties =
-                typename TTimebaseProvider::CompositionCapabilities::template PropertiesFor<MonotonicTimebase>;
+                typename TTimebaseProvider::CompositionOffers::template PropertiesFor<MonotonicTimebase>;
 
             static_assert(
                 Properties::template Contains<TimebaseFrequencyNumerator>,
@@ -149,7 +149,7 @@ namespace ESPressio::Clock {
     template<class TTimebaseProvider>
     class MonotonicClockProvider final : public Framework::Provider<
         Domain,
-        Framework::Provides<
+        Framework::Offers<
             Framework::Offer<
                 MonotonicClock,
                 Framework::PropertyValue<
@@ -158,8 +158,12 @@ namespace ESPressio::Clock {
                 >
             >
         >,
-        Framework::Requires<
-            Framework::Need<MonotonicTimebase>
+        Framework::Contract<
+            Framework::Requirement<
+                MonotonicTimebase,
+                Framework::RequirementScope::SameDomain,
+                Framework::ExactlyProviders<1U>
+            >
         >
     > {
     private:

@@ -18,7 +18,7 @@ namespace ESPressio::Clock {
         struct StopwatchMonotonicClockTraits {
 
             static_assert(
-                TMonotonicClockProvider::CompositionCapabilities::template Contains<MonotonicClock>,
+                TMonotonicClockProvider::CompositionOffers::template Contains<MonotonicClock>,
                 "Stopwatch requires a provider that supplies MonotonicClock"
             );
 

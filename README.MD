@@ -31,7 +31,7 @@ EDP-Clock
 
 `EDP-Clock` currently has no optional ESPressio library dependencies.
 
-A consuming application that instantiates `SynchronizedClockProvider` must select a concrete `AtomicWord32` provider through Composition. That provider is an application capability satisfier rather than a direct or optional dependency of `EDP-Clock`.
+`SynchronizedClockProvider` declares its concrete Platform `AtomicWord32` need as an explicit external Composition `Requirement`. A consuming Architecture must therefore contain exactly one qualified provider; the concrete provider repository remains an application capability choice rather than an additional library dependency of `EDP-Clock`.
 
 See [DEPENDENCY_GRAPH.MD](./DEPENDENCY_GRAPH.MD) for the maintained dependency graph and target-provider selection notes.
 
