@@ -27,7 +27,7 @@ namespace ESPressio::Clock {
     >
     struct MonotonicTimebaseProvider : Framework::Provider<
         Domain,
-        Framework::Provides<
+        Framework::Offers<
             Framework::Offer<
                 MonotonicTimebase,
                 Framework::PropertyValue<

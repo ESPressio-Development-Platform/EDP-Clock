@@ -444,7 +444,7 @@ The Platform domain supplies:
 AtomicWord32
 ```
 
-`SynchronizedClockProvider` formally requires `MonotonicClock` in the Clock domain. Its selected `TAtomicWordProvider` is independently validated through the Platform `ConcurrentSnapshot` contract. This avoids inventing a duplicate Clock capability solely to bridge Composition domains.
+`SynchronizedClockProvider` declares a consolidated provider `Contract`: exactly one qualified `MonotonicClock` must be present in the same Clock domain, and exactly one qualified Platform `AtomicWord32` provider must be present in an external domain. The external Requirement carries the lock-free/four-byte qualification already required by `ConcurrentSnapshot`; it adds compile-time Architecture visibility without adding runtime state.
 
 The intended Bootstrap order is:
 
