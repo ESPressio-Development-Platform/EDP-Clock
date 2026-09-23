@@ -11,7 +11,7 @@ namespace {
     /// Host-test concrete provider for the Platform AtomicWord32 capability.
     class TestAtomicWord32Provider final : public Framework::Provider<
         ESPressio::Platform::Domain,
-        Framework::Provides<
+        Framework::Offers<
             Framework::Offer<
                 ESPressio::Platform::Concurrency::AtomicWord32,
                 Framework::PropertyValue<ESPressio::Platform::Concurrency::LockFree, true>,
