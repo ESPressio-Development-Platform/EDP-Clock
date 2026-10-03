@@ -2,9 +2,9 @@
 
 **Primary classification:** PUBLIC PROVIDER / EXTENSION API
 
-**Source baseline:** `6a9ab9ffab8c90901f48b6c2c70767942fe43380`
+**Source baseline:** `c3cb4436f0bd831c7800ca3669ce8342db9b1b72`
 
-[Open exact source](https://github.com/ESPressio-Development-Platform/EDP-Clock/blob/6a9ab9ffab8c90901f48b6c2c70767942fe43380/src/clock/SynchronizedClockProvider.hpp)
+[Open exact source](https://github.com/ESPressio-Development-Platform/EDP-Clock/blob/c3cb4436f0bd831c7800ca3669ce8342db9b1b72/src/clock/SynchronizedClockProvider.hpp)
 
 ## Direct includes
 
@@ -17,6 +17,7 @@
 - `ESPressio_Platform.hpp`
 - `ClockComposition.hpp`
 - `ClockCorrelation.hpp`
+- `ClockDisciplineTransition.hpp`
 - `MonotonicTimestamp.hpp`
 - `SynchronizationObservation.hpp`
 - `SynchronizationObservationStatus.hpp`
@@ -163,22 +164,32 @@ SynchronizationState State;
 
 ### `HasObservation`
 
-**Classification:** PUBLIC PROVIDER / EXTENSION API · source access: `public`
+**Classification:** PRIVATE IMPLEMENTATION · source access: internal snapshot field
 
-Indicates whether at least one observation has been accepted in this runtime.
+Indicates whether the current reference anchor came from an accepted observation. Cross-Era timeline preservation clears this bit so `Correlation()` cannot expose an old-Era mapping even though public time may continue.
 
 ```cpp
 std::uint8_t HasObservation;
 ```
 
-### `Reserved`
+### `HasPublishedTimeline`
 
-**Classification:** PUBLIC PROVIDER / EXTENSION API · source access: `public`
+**Classification:** PRIVATE IMPLEMENTATION · source access: internal snapshot field
 
-Reserved zeroed storage keeps the 48-byte snapshot representation fully explicit.
+Records whether synchronized time has ever satisfied its quality contract in the current published timeline. It is distinct from current observation availability: a provisional never-qualified observation has no non-regression authority, while an explicitly preserved cross-Era timeline can remain authoritative after its old correlation is invalidated.
 
 ```cpp
-std::uint16_t Reserved;
+std::uint8_t HasPublishedTimeline;
+```
+
+### `Reserved`
+
+**Classification:** PRIVATE IMPLEMENTATION · source access: internal snapshot field
+
+Explicit zeroed byte retaining the exact 48-byte snapshot representation. `HasPublishedTimeline` consumes one byte of the former two-byte reserve, so retained discipline storage does not grow.
+
+```cpp
+std::uint8_t Reserved;
 ```
 
 ### `ScaledFractionResult`
@@ -416,8 +427,7 @@ second physical counter. Mutable discipline state is published through EDP-Platf
 fixed-storage ConcurrentSnapshot so one writer can update the mapping while arbitrary
 application threads call Now() without a mutex, heap allocation, worker task, or vtable.
 
-Exactly one execution context may call Observe() for a given provider. Source selection and
-serialization of observations therefore remain upstream responsibilities.
+Exactly one execution context may call `Observe()`, `BeginSameEraTransition()` and `BeginCrossEraTransition()` for a given provider. Source/Era selection and serialization of all writer operations therefore remain upstream responsibilities.
 
 - **Template parameter `TMonotonicClockProvider`:** Concrete application-selected MonotonicClock provider.
 - **Template parameter `TAtomicWordProvider`:** Concrete application-selected Platform AtomicWord32 provider.
@@ -678,6 +688,33 @@ monotonic coordinate can never precede the anchor contained by the state being p
 
 ```cpp
 SynchronizedReading Now() const noexcept
+```
+
+### `BeginSameEraTransition`
+
+**Classification:** PUBLIC PROVIDER / EXTENSION API · source access: `public`
+
+Marks a source/parent/provider transition that preserves temporal Era. The operation retains correlation and non-regressing discipline, raises uncertainty to at least the configured synchronization limit and marks quality for reacquisition. With no authoritative timeline it clears provisional state and returns `NoPublishedTimeline`.
+
+The same single writer that calls `Observe()` must serialize this non-blocking, allocation-free operation.
+
+```cpp
+ClockDisciplineTransitionStatus BeginSameEraTransition() noexcept
+```
+
+### `BeginCrossEraTransition`
+
+**Classification:** PUBLIC PROVIDER / EXTENSION API · source access: `public`
+
+Applies the upstream-selected cross-Era mode. `PreservePublishedTimeline` anchors current public time, invalidates old correlation, saturates uncertainty and preserves non-regression. `ReconstructTimeline` resets discipline so a new Era may establish a fresh coordinate. Clock does not choose the mode or current Era.
+
+- **Parameter `mode`:** preserve the public coordinate or reconstruct the runtime timeline.
+- **Returns:** `Applied`, or `NoPublishedTimeline` when preservation had no authoritative timeline to retain.
+
+```cpp
+ClockDisciplineTransitionStatus BeginCrossEraTransition(
+            CrossEraTransitionMode mode
+        ) noexcept
 ```
 
 ### `Observe`

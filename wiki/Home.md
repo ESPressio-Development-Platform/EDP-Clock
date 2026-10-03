@@ -1,8 +1,8 @@
 # EDP-Clock Developer Wiki
 
-EDP-Clock owns ESPressio's canonical monotonic time coordinate, synchronized-time discipline and correlation, plus stopwatch semantics built on monotonic time.
+EDP-Clock owns ESPressio's canonical monotonic time coordinate, synchronized-time discipline, compact temporal provenance/capture values, immutable correlation and Stopwatch semantics.
 
-This Wiki is maintained beside the code on `main`. Source code and repository `docs/` remain the normative implementation and durable contract sources; the Wiki is the internal developer navigation and explanation layer.
+It deliberately does not own calendars, civil time, source selection, Mesh lineage, provider-native timestamp extension or application admission policy. The Wiki is maintained beside the code on the branch it documents. Source plus repository `docs/` remain normative; this Wiki is the internal developer and exhaustive-reference layer.
 
 ## Public entry point
 
@@ -12,8 +12,8 @@ This Wiki is maintained beside the code on `main`. Source code and repository `d
 
 ## Dependencies
 
-Mandatory: EDP-System and EDP-Platform.
+Mandatory package dependencies are EDP-System and EDP-Platform. Temporal provenance adds no Radio, Mesh or identity dependency.
 
 ## Developer map
 
-Use [Architecture](Architecture.md), [Public API](Public-API.md), [Internal API](Internal-API.md), [Implementation](Implementation.md), [Composition](Composition.md), [Resources / Lifecycle / Concurrency](Resources-Lifecycle-Concurrency.md), and [Build / Test / Source](Build-Test-Source.md).
+Start with [Architecture](Architecture), [Public API](Public-API), [Composition](Composition), and [Resources / Lifecycle / Concurrency](Resources-Lifecycle-Concurrency). Maintainers should also read [Internal API](Internal-API), [Private Implementation](Private-Implementation), [Implementation](Implementation), [Dependency Contracts](Dependency-Contracts), [Build / Test / Source](Build-Test-Source), and the exhaustive [Reference Index](Reference-Index).

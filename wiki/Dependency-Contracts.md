@@ -1,36 +1,31 @@
 # Dependency Contracts
 
-EDP-Clock depends on **EDP-System** and **EDP-Platform**.
+EDP-Clock has mandatory package dependencies on **EDP-System** and **EDP-Platform**. Temporal provenance introduces no EDP-Radio, EDP-Mesh, EDP-RemoteSystem or identity dependency.
 
 ## EDP-System
 
-The Clock domain, capabilities, provider offers and requirements use the EDP-System Composition Framework.
+Clock Domain capabilities, provider offers, properties and requirements use the EDP-System Composition Framework.
 
 ## Same-domain Clock contracts
 
 ### MonotonicClockProvider
 
-Requires exactly one same-domain `MonotonicTimebase` provider. The selected timebase must expose a coherent, concurrent-safe, non-regressing `CurrentCount() const noexcept` and exact frequency numerator/denominator properties.
+Requires exactly one same-domain `MonotonicTimebase` provider. The selected timebase exposes coherent, concurrent-safe, non-regressing `CurrentCount() const noexcept` and exact frequency numerator/denominator properties.
 
 ### SynchronizedClockProvider
 
-Requires exactly one same-domain `MonotonicClock` whose `ClockResolutionNanoseconds` is **strictly less than** the configured synchronization uncertainty limit.
+Requires exactly one same-domain `MonotonicClock` whose `ClockResolutionNanoseconds` is strictly less than the configured synchronization uncertainty limit.
 
 ## EDP-Platform contract
 
-`SynchronizedClockProvider` additionally requires exactly one external `AtomicWord32` provider with:
+`SynchronizedClockProvider` additionally requires exactly one external `AtomicWord32` provider with `LockFree == true` and `AtomicWordStorageBytes == sizeof(uint32_t)`. That provider backs the fixed-storage one-writer/many-reader `ConcurrentSnapshot`.
 
-- `LockFree == true`;
-- `AtomicWordStorageBytes == sizeof(uint32_t)`.
+## Downstream temporal integration
 
-That provider backs the fixed-storage `ConcurrentSnapshot` used for one-writer/many-reader synchronized-clock publication.
+Connectivity implementations may produce canonical `MonotonicCaptureBounds`; coordinators may retain `ClockEra` and Era-qualified values and invoke transitions. These are downstream consumers, not reverse package dependencies. Native capture conversion and full Era provenance remain outside EDP-Clock.
 
-## Application-wide monotonic binding
+## Application-wide bindings and ownership
 
-`BindMonotonicClock()` establishes a process-lifetime borrowed binding used by `MonotonicNow()`. Binding must happen during Bootstrap before concurrent users run and is intentionally irreversible for the runtime lifetime. EDP-Threading depends on this convenience binding for canonical deadlines.
+`BindMonotonicClock()` and `BindSynchronizedClock()` establish process-lifetime borrowed bindings during Bootstrap. Providers borrow their lower-level provider instances and own no timer hardware or Platform provider lifetime.
 
-## Ownership
-
-Clock providers borrow their lower-level provider instances; they do not own timer hardware or Platform provider lifetime.
-
-> Dependency contract audit baseline: `774c3bd626d3b79b988ccc93c990d156ed433bcc` (`main`).
+> Dependency contract re-audited for temporal provenance at EDP-Clock `c3cb4436f0bd831c7800ca3669ce8342db9b1b72`.
