@@ -247,6 +247,8 @@ namespace {
 
 
 int main() {
+    using ESPressio::Clock::ClockDisciplineTransitionStatus;
+    using ESPressio::Clock::CrossEraTransitionMode;
     using ESPressio::Clock::SynchronizationObservationStatus;
     using ESPressio::Clock::SynchronizationState;
 
@@ -567,6 +569,127 @@ int main() {
         correctedClock.Now().Timestamp().Nanoseconds() ==
         beforeRejectedOrdering.Timestamp().Nanoseconds()
     );
+
+    // A same-era source transition retains correlation and the published timeline while marking
+    // quality for conservative reacquisition until replacement evidence is accepted.
+    TestTimebase sameEraTimebase;
+    MonotonicClock sameEraMonotonic(sameEraTimebase);
+    SynchronizedClock sameEraClock(sameEraMonotonic);
+    assert(
+        sameEraClock.BeginSameEraTransition() ==
+        ClockDisciplineTransitionStatus::NoPublishedTimeline
+    );
+    sameEraTimebase.Set(1000U);
+    assert(
+        sameEraClock.Observe(
+            Observation(
+                1000U,
+                1000001000ULL,
+                0U
+            )
+        ) == SynchronizationObservationStatus::Accepted
+    );
+    sameEraTimebase.Advance(1000U);
+    const auto beforeSameEraTransition = sameEraClock.Now();
+    assert(sameEraClock.Correlation().IsAvailable());
+    assert(
+        sameEraClock.BeginSameEraTransition() ==
+        ClockDisciplineTransitionStatus::Applied
+    );
+    const auto duringSameEraTransition = sameEraClock.Now();
+    assert(
+        duringSameEraTransition.Timestamp().Nanoseconds() ==
+        beforeSameEraTransition.Timestamp().Nanoseconds()
+    );
+    assert(duringSameEraTransition.State() == SynchronizationState::Reacquiring);
+    assert(sameEraClock.Correlation().IsAvailable());
+    assert(
+        sameEraClock.Observe(
+            Observation(
+                sameEraTimebase.CurrentCount(),
+                duringSameEraTransition.Timestamp().Nanoseconds(),
+                0U
+            )
+        ) == SynchronizationObservationStatus::Accepted
+    );
+    assert(sameEraClock.Now().State() == SynchronizationState::Synchronized);
+
+    // Cross-era preservation invalidates old reference correlation while keeping the public clock
+    // non-regressing, even when the new era starts behind the previously published coordinate.
+    TestTimebase preservedEraTimebase;
+    MonotonicClock preservedEraMonotonic(preservedEraTimebase);
+    SynchronizedClock preservedEraClock(preservedEraMonotonic);
+    preservedEraTimebase.Set(1000U);
+    assert(
+        preservedEraClock.Observe(
+            Observation(
+                1000U,
+                9000001000ULL,
+                0U
+            )
+        ) == SynchronizationObservationStatus::Accepted
+    );
+    preservedEraTimebase.Advance(1000U);
+    const auto beforePreservedEra = preservedEraClock.Now();
+    assert(
+        preservedEraClock.BeginCrossEraTransition(
+            CrossEraTransitionMode::PreservePublishedTimeline
+        ) == ClockDisciplineTransitionStatus::Applied
+    );
+    const auto preservedHold = preservedEraClock.Now();
+    assert(
+        preservedHold.Timestamp().Nanoseconds() ==
+        beforePreservedEra.Timestamp().Nanoseconds()
+    );
+    assert(preservedHold.State() == SynchronizationState::LostSynchronization);
+    assert(preservedHold.Uncertainty().IsSaturated());
+    assert(!preservedEraClock.Correlation().IsAvailable());
+
+    preservedEraTimebase.Advance(1000U);
+    const auto progressedPreservedHold = preservedEraClock.Now();
+    assert(
+        progressedPreservedHold.Timestamp().Nanoseconds() >
+        preservedHold.Timestamp().Nanoseconds()
+    );
+    assert(
+        preservedEraClock.Observe(
+            Observation(
+                preservedEraTimebase.CurrentCount(),
+                500U,
+                0U
+            )
+        ) == SynchronizationObservationStatus::Accepted
+    );
+    const auto afterBehindEraObservation = preservedEraClock.Now();
+    assert(
+        afterBehindEraObservation.Timestamp().Nanoseconds() ==
+        progressedPreservedHold.Timestamp().Nanoseconds()
+    );
+    assert(afterBehindEraObservation.State() == SynchronizationState::LostSynchronization);
+    assert(preservedEraClock.Correlation().IsAvailable());
+
+    // Runtime reconstruction explicitly discards the old public timeline and permits a fresh era
+    // to establish its own coordinate directly.
+    assert(
+        preservedEraClock.BeginCrossEraTransition(
+            CrossEraTransitionMode::ReconstructTimeline
+        ) == ClockDisciplineTransitionStatus::Applied
+    );
+    const auto reconstructedInitial = preservedEraClock.Now();
+    assert(reconstructedInitial.State() == SynchronizationState::NeverSynchronized);
+    assert(reconstructedInitial.Timestamp().Nanoseconds() == 0U);
+    assert(!preservedEraClock.Correlation().IsAvailable());
+    assert(
+        preservedEraClock.Observe(
+            Observation(
+                preservedEraTimebase.CurrentCount(),
+                500U,
+                0U
+            )
+        ) == SynchronizationObservationStatus::Accepted
+    );
+    assert(preservedEraClock.Now().Timestamp().Nanoseconds() == 500U);
+    assert(preservedEraClock.Now().State() == SynchronizationState::Synchronized);
 
     // Application-wide SynchronizedNow binding is shared across translation units.
     assert(ESPressio::Clock::BindSynchronizedClock(correctedClock));

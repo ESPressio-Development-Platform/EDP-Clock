@@ -54,6 +54,10 @@ compile_and_run \
     "${ROOT_DIR}/tests/synchronized/ClockCorrelationTests.cpp"
 
 compile_and_run \
+    ClockEraTests \
+    "${ROOT_DIR}/tests/synchronized/ClockEraTests.cpp"
+
+compile_and_run \
     FourTimestampEstimatorTests \
     "${ROOT_DIR}/tests/synchronized/FourTimestampEstimatorTests.cpp"
 

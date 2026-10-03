@@ -11,6 +11,7 @@
 
 #include "ClockComposition.hpp"
 #include "ClockCorrelation.hpp"
+#include "ClockDisciplineTransition.hpp"
 #include "MonotonicTimestamp.hpp"
 #include "SynchronizationObservation.hpp"
 #include "SynchronizationObservationStatus.hpp"
@@ -101,11 +102,14 @@ namespace ESPressio::Clock {
             /// Last explicitly established lifecycle state for this mapping.
             SynchronizationState State;
 
-            /// Indicates whether at least one observation has been accepted in this runtime.
+            /// Indicates whether the current reference anchor came from an accepted observation.
             std::uint8_t HasObservation;
 
+            /// Indicates whether synchronized time has ever become authoritative in this timeline.
+            std::uint8_t HasPublishedTimeline;
+
             /// Reserved zeroed storage keeps the 48-byte snapshot representation fully explicit.
-            std::uint16_t Reserved;
+            std::uint8_t Reserved;
 
         };
 
@@ -547,6 +551,7 @@ namespace ESPressio::Clock {
             state.UncertaintyAtAnchorNanoseconds = std::numeric_limits<std::uint32_t>::max();
             state.State = SynchronizationState::NeverSynchronized;
             state.HasObservation = 0U;
+            state.HasPublishedTimeline = 0U;
             return state;
         }
 
@@ -605,7 +610,12 @@ namespace ESPressio::Clock {
             const Detail::SynchronizedClockState& state,
             std::uint64_t monotonicNanoseconds
         ) noexcept {
-            if (state.HasObservation == 0U) return Detail::SynchronizedProjection {};
+            if (
+                (state.HasObservation == 0U) &&
+                (state.HasPublishedTimeline == 0U)
+            ) {
+                return Detail::SynchronizedProjection {};
+            }
 
             const auto elapsedNanoseconds = monotonicNanoseconds >= state.MonotonicAnchorNanoseconds
                 ? monotonicNanoseconds - state.MonotonicAnchorNanoseconds
@@ -822,6 +832,81 @@ namespace ESPressio::Clock {
         }
 
 
+        // Source and era transitions.
+
+        /// Marks a source/parent/provider transition that preserves the current temporal era.
+        ///
+        /// Exactly the same single upstream execution context that calls Observe() must serialize
+        /// this operation. Existing discipline and correlation remain available, while quality is
+        /// conservatively marked Reacquiring until new same-era evidence is accepted. If no
+        /// authoritative published timeline exists, provisional observation state is discarded.
+        ClockDisciplineTransitionStatus BeginSameEraTransition() noexcept {
+            auto state = _state.Read();
+
+            if (state.HasPublishedTimeline == 0U) {
+                _state.Publish(InitialState());
+                return ClockDisciplineTransitionStatus::NoPublishedTimeline;
+            }
+
+            state.UncertaintyAtAnchorNanoseconds = std::max(
+                state.UncertaintyAtAnchorNanoseconds,
+                TSynchronizationUncertaintyLimitNanoseconds
+            );
+
+            if (state.State != SynchronizationState::LostSynchronization)
+                state.State = SynchronizationState::Reacquiring;
+
+            _state.Publish(state);
+            return ClockDisciplineTransitionStatus::Applied;
+        }
+
+        /// Applies one explicit transition to a different temporal era.
+        ///
+        /// PreservePublishedTimeline invalidates the old reference correlation but retains the
+        /// current public coordinate as a saturated-uncertainty, non-regressing hold point from
+        /// which new-era observations must slew. ReconstructTimeline discards the prior public
+        /// mapping so the next accepted observation may establish a fresh runtime timeline.
+        /// Exactly the Observe() writer must serialize this operation.
+        ClockDisciplineTransitionStatus BeginCrossEraTransition(
+            CrossEraTransitionMode mode
+        ) noexcept {
+            if (mode == CrossEraTransitionMode::ReconstructTimeline) {
+                _state.Publish(InitialState());
+                return ClockDisciplineTransitionStatus::Applied;
+            }
+
+            const auto currentState = _state.Read();
+
+            if (currentState.HasPublishedTimeline == 0U) {
+                _state.Publish(InitialState());
+                return ClockDisciplineTransitionStatus::NoPublishedTimeline;
+            }
+
+            const auto transitionMonotonic = _monotonicClock->Now();
+            const auto currentProjection = Project(
+                currentState,
+                transitionMonotonic.Nanoseconds()
+            );
+            auto nextState = InitialState();
+
+            nextState.MonotonicAnchorNanoseconds = transitionMonotonic.Nanoseconds();
+            nextState.SynchronizedAnchorNanoseconds = currentProjection.TimestampNanoseconds;
+            nextState.ReferenceAnchorNanoseconds = 0U;
+            nextState.RemainingPhaseCorrectionNanoseconds = 0;
+            nextState.FrequencyCorrectionPartsPerBillion = 0;
+            nextState.FrequencyUncertaintyPartsPerBillion =
+                TMaximumFrequencyCorrectionPartsPerBillion;
+            nextState.UncertaintyAtAnchorNanoseconds =
+                std::numeric_limits<std::uint32_t>::max();
+            nextState.State = SynchronizationState::LostSynchronization;
+            nextState.HasObservation = 0U;
+            nextState.HasPublishedTimeline = 1U;
+
+            _state.Publish(nextState);
+            return ClockDisciplineTransitionStatus::Applied;
+        }
+
+
         // Clock discipline.
 
         /// Applies one source-agnostic synchronization observation to the clock discipline.
@@ -896,7 +981,7 @@ namespace ESPressio::Clock {
             nextState.UncertaintyAtAnchorNanoseconds = currentObservationUncertainty;
             nextState.HasObservation = 1U;
 
-            const auto hasEverSynchronized = currentState.State != SynchronizationState::NeverSynchronized;
+            const auto hasEverSynchronized = currentState.HasPublishedTimeline != 0U;
 
             if (!hasEverSynchronized) {
                 // Before synchronized time has ever satisfied its contract, the mapping is not yet
@@ -906,10 +991,15 @@ namespace ESPressio::Clock {
                 nextState.State = currentObservationUncertainty < TSynchronizationUncertaintyLimitNanoseconds
                     ? SynchronizationState::Synchronized
                     : SynchronizationState::NeverSynchronized;
+                nextState.HasPublishedTimeline = nextState.State == SynchronizationState::Synchronized
+                    ? 1U
+                    : 0U;
 
                 _state.Publish(nextState);
                 return SynchronizationObservationStatus::Accepted;
             }
+
+            nextState.HasPublishedTimeline = 1U;
 
             const auto currentProjection = Project(
                 currentState,
