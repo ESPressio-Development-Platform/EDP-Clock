@@ -1,8 +1,7 @@
-#include <ESPressio_Platform_ESP_IDF.hpp>
-
 #include <cstdint>
 
 #include <ESPressio_Clock.hpp>
+#include <ESPressio_Platform_ESP_IDF.hpp>
 
 namespace Demo {
 

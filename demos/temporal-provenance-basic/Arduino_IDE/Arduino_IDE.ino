@@ -1,10 +1,9 @@
 #include <Arduino.h>
 
-#include <ESPressio_Platform_Arduino.hpp>
-
 #include <cstdint>
 
 #include <ESPressio_Clock.hpp>
+#include <ESPressio_Platform_Arduino.hpp>
 
 namespace Demo {
 
