@@ -17,6 +17,9 @@ The following Clock facilities are currently provided:
 - [Clock Correlation](./docs/CLOCK-CORRELATION.MD)  
   Captures immutable monotonic-to-reference mappings for retrospective hardware/event timestamp projection, including signed frequency correction, explicit capture uncertainty, and bounded projection quality without retaining Clock history.
 
+- [Temporal Provenance and Source Transitions](./docs/TEMPORAL-PROVENANCE.MD)  
+  Defines compact Clock Eras, canonical monotonic capture bounds, Era-qualified projection/assessment values, and explicit source/era discipline transitions while keeping identity, source selection and provider-native ticks outside Clock.
+
 - [Stopwatch](./docs/STOPWATCH.MD)  
   Measures non-negative elapsed physical time from an application-selected `MonotonicClock`, with start/resume, stop, reset, restart, deterministic saturation, and no dependency on synchronization or scheduling facilities.
 
@@ -43,6 +46,7 @@ Buildable demonstrations are provided under [`./demos`](./demos) for:
 - `synchronized-clock-basic`;
 - `four-timestamp-estimator-basic`;
 - `clock-correlation-basic`;
+- `temporal-provenance-basic`;
 - `stopwatch-basic`.
 
 Each demo contains Arduino IDE, PlatformIO Arduino, and PlatformIO ESP-IDF targets. Synchronized Clock and Clock Correlation use the target-appropriate concrete `AtomicWord32` provider.
@@ -68,7 +72,7 @@ Clock therefore consumes already-selected Platform concurrency requirements; Pla
 
 ## Development Status
 
-The monotonic and synchronized Clock foundations, four-timestamp time transfer, immutable Clock Correlation, and Stopwatch are implemented. Timers, scheduling, alarms, RTC-device semantics, and human-time interpretation remain intentionally outside the current Clock foundation.
+The monotonic and synchronized Clock foundations, four-timestamp time transfer, immutable Clock Correlation, compact temporal-provenance/source-transition contracts, and Stopwatch are implemented. Timers, scheduling, alarms, RTC-device semantics, and human-time interpretation remain intentionally outside the current Clock foundation.
 
 ## C++ Language Baseline
 

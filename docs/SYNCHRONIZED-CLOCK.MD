@@ -16,8 +16,9 @@
 12. [Composition and Bootstrap](#composition-and-bootstrap)
 13. [Memory Model](#memory-model)
 14. [Source and Transport Separation](#source-and-transport-separation)
-15. [Example](#example)
-16. [Summary](#summary)
+15. [Explicit Source and Era Transitions](#explicit-source-and-era-transitions)
+16. [Example](#example)
+17. [Summary](#summary)
 
 ---
 
@@ -55,6 +56,9 @@ SynchronizedReading
 SynchronizationObservation
 FourTimestampExchange
 EstimateFourTimestampExchange()
+MonotonicCaptureBounds
+ClockEra and Era-qualified values
+explicit source/era discipline transitions
 time-transfer admission
 observation admission
 frequency correction
@@ -159,7 +163,7 @@ enum class SynchronizationState : std::uint8_t {
 
 Initial state for every runtime incarnation. It means that the synchronized clock has never yet satisfied its synchronization-quality contract in this runtime incarnation.
 
-Once the provider leaves `NeverSynchronized`, it never returns to that state until a new runtime incarnation begins.
+Once a published timeline becomes authoritative, ordinary observations and same-Era source transitions do not return it to `NeverSynchronized`. An explicit application-selected cross-Era `ReconstructTimeline` transition deliberately resets the discipline and permits a fresh Era to establish a new runtime coordinate.
 
 ### Synchronized
 
@@ -481,6 +485,11 @@ The synchronized implementation is fixed-size and heap-free.
 | `SynchronizedReading` | 16 bytes |
 | `FourTimestampExchange` | 48 bytes |
 | `FourTimestampExchangeResult` | 40 bytes |
+| `ClockEra` | 8 bytes |
+| `MonotonicCaptureBounds` | 16 bytes |
+| `EraQualifiedClockCorrelation` | 40 bytes |
+| `EraQualifiedClockCorrelationProjection` | 24 bytes |
+| `EraQualifiedClockAssessment` | 24 bytes |
 
 The logical mutable discipline state is exactly:
 
@@ -532,6 +541,28 @@ The transport owns timestamp acquisition and carriage. For four-timestamp transp
 The upstream source-selection layer decides which source or accepted estimate to trust, when to switch source, and whether/how to combine multiple observations. Clock decides how an individual four-timestamp exchange is reduced, whether an observation is temporally/rate admissible, how phase/rate are disciplined, how uncertainty evolves, and what lifecycle state consumers observe.
 
 This separation allows future Mesh, Radio, RTC and networking implementations to evolve independently from Clock discipline internals.
+
+---
+
+## Explicit Source and Era Transitions
+
+The same single upstream writer that serializes `Observe()` also invokes transition operations. Clock still does not select a source or an Era.
+
+```cpp
+synchronizedClock.BeginSameEraTransition();
+
+synchronizedClock.BeginCrossEraTransition(
+    CrossEraTransitionMode::PreservePublishedTimeline
+);
+```
+
+A same-Era transition retains the accepted correlation and non-regressing timeline but marks quality `Reacquiring` until replacement evidence is accepted. If no authoritative timeline exists, provisional observation state is discarded and `NoPublishedTimeline` is returned.
+
+`PreservePublishedTimeline` invalidates the old reference correlation, anchors the current published coordinate, saturates uncertainty, reports `LostSynchronization`, and permits new-Era observations to correct only through non-regressing slew. `ReconstructTimeline` explicitly resets discipline to `NeverSynchronized`; the next acceptable observation may step to the new Era's coordinate.
+
+The 48-byte discipline snapshot distinguishes `HasObservation` from `HasPublishedTimeline`. This prevents a merely accepted but never-qualified provisional mapping from acquiring non-regression authority, while allowing a preserved public timeline to continue after its old reference correlation has been invalidated. The additional bit reuses former reserved storage, so retained Clock state does not grow.
+
+See [Temporal Provenance and Source Transitions](./TEMPORAL-PROVENANCE.MD) for the complete contract.
 
 ---
 

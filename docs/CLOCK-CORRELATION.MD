@@ -11,8 +11,9 @@
 7. [Range Failures](#range-failures)
 8. [Concurrency and Lifetime](#concurrency-and-lifetime)
 9. [Memory Model](#memory-model)
-10. [Intended Use](#intended-use)
-11. [Non-Goals](#non-goals)
+10. [Era Qualification](#era-qualification)
+11. [Intended Use](#intended-use)
+12. [Non-Goals](#non-goals)
 
 ---
 
@@ -90,6 +91,8 @@ The public clock currently satisfies its configured quality contract.
 For example, an estimate with ±3 ms uncertainty can still be useful to an application even though it cannot satisfy the default strict `< 1 ms` `Synchronized` requirement.
 
 Likewise, a correlation can remain useful while the public clock is `Reacquiring`, `Holdover`, or `LostSynchronization`; its own uncertainty tells the consumer how useful the retained estimate remains.
+
+An explicit cross-Era transition is different. `BeginCrossEraTransition()` invalidates the old accepted reference correlation so a consumer cannot accidentally project through unrelated temporal provenance. Non-regressing timeline preservation may continue publishing a coordinate with saturated uncertainty, but `Correlation()` remains unavailable until a new-Era observation is accepted.
 
 ---
 
@@ -252,10 +255,38 @@ Clock retains no correlation-history ring. Consumers that need a historical mapp
 | --- | ---: |
 | `ClockCorrelation` | 32 bytes |
 | `ClockCorrelationProjection` | 16 bytes |
+| `ClockEra` | 8 bytes |
+| `EraQualifiedClockCorrelation` | 40 bytes |
+| `EraQualifiedClockCorrelationProjection` | 24 bytes |
+| `EraQualifiedClockAssessment` | 24 bytes |
 
 The correlation layer adds no retained storage to `SynchronizedClockProvider`. A correlation object exists only where a consumer chooses to retain one.
 
 The existing synchronized discipline state and its Platform `ConcurrentSnapshot` remain unchanged.
+
+---
+
+## Era Qualification
+
+A synchronized coordinate is comparable only within the temporal Era that produced it. Clock therefore provides compact wrappers without learning any Mesh or source identity:
+
+```cpp
+const auto qualified = ESPressio::Clock::EraQualifiedClockCorrelation(
+    currentEra,
+    synchronizedClock.Correlation()
+);
+
+const auto projected = qualified.Correlate(
+    capture.Midpoint(),
+    capture.Uncertainty()
+);
+```
+
+`ClockEra` is an opaque, comparable, non-zero 8-byte value. The upstream coordinator owns its full provenance mapping and must detect/refuse conflicting mappings. EDP-Clock does not derive an Era from Device identity, rank sources, retain lineage, or serialize a provider-native counter.
+
+`EraQualifiedClockAssessment` flattens the Era, projection coordinate, uncertainty, projection status and application-policy assessment into 24 bytes. Flattening deliberately uses the projection representation's otherwise unavoidable alignment budget instead of retaining a 32-byte nested aggregate. The assessment vocabulary is `NotRequired`, `Reliable` or `Unreliable`; strict policy refusal happens before family admission and is not represented as a fourth admitted assessment.
+
+See [Temporal Provenance and Source Transitions](./TEMPORAL-PROVENANCE.MD) for the complete ownership, transition and capture-bound contract.
 
 ---
 
