@@ -60,7 +60,7 @@ namespace Demo {
         SynchronizedClock synchronizedClock(monotonicClock);
 
         timebase.Advance(1000U);
-+
+
         if (
             synchronizedClock.Observe(
                 Clock::SynchronizationObservation(
@@ -143,4 +143,7 @@ namespace Demo {
 
 } // Demo
 
-/// Runs the demonstration from the ESP-IDF application entry point.\nextern \"C\" void app_main() {\n    static_cast<void>(Demo::Run());\n}
+/// Runs the demonstration from the ESP-IDF application entry point.
+extern "C" void app_main() {
+    static_cast<void>(Demo::Run());
+}

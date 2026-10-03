@@ -1,4 +1,6 @@
-#include <Arduino.h>\n\n#include <ESPressio_Platform_Arduino.hpp>
+#include <Arduino.h>
+
+#include <ESPressio_Platform_Arduino.hpp>
 
 #include <cstdint>
 
@@ -60,7 +62,7 @@ namespace Demo {
         SynchronizedClock synchronizedClock(monotonicClock);
 
         timebase.Advance(1000U);
-+
+
         if (
             synchronizedClock.Observe(
                 Clock::SynchronizationObservation(
@@ -143,4 +145,10 @@ namespace Demo {
 
 } // Demo
 
-/// Runs the demonstration once during Arduino initialization.\nvoid setup() {\n    static_cast<void>(Demo::Run());\n}\n\n/// Leaves the demonstration idle after the one-time run.\nvoid loop() {}
+/// Runs the demonstration once during Arduino initialization.
+void setup() {
+    static_cast<void>(Demo::Run());
+}
+
+/// Leaves the demonstration idle after the one-time run.
+void loop() {}
