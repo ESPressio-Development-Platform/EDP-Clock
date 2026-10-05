@@ -81,6 +81,20 @@ Creates an unavailable projection result.
 constexpr ClockCorrelationProjection() noexcept = default;
 ```
 
+### `FromValues`
+
+**Classification:** PUBLIC API · source access: `public`
+
+Reconstructs one canonical projection from already-observed projection values. Correlated evidence retains the supplied synchronized coordinate and uncertainty; non-correlated statuses canonicalize to an unavailable coordinate with saturated uncertainty, matching `ClockCorrelation::Correlate`.
+
+```cpp
+static constexpr ClockCorrelationProjection FromValues(
+    const SynchronizedTimestamp& timestamp,
+    const SynchronizationUncertainty& uncertainty,
+    ClockCorrelationProjectionStatus status
+) noexcept
+```
+
 ### `Timestamp`
 
 **Classification:** PUBLIC API · source access: `public`

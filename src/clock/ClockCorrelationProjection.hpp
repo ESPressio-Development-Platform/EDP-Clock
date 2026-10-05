@@ -45,6 +45,36 @@ namespace ESPressio::Clock {
         /// Creates an unavailable projection result.
         constexpr ClockCorrelationProjection() noexcept = default;
 
+        /// Reconstructs one canonical projection value from already-observed projection facts.
+        ///
+        /// Correlated evidence retains the supplied synchronized coordinate and uncertainty.
+        /// Non-correlated statuses canonicalize to the same unavailable coordinate and saturated
+        /// uncertainty representation emitted by ClockCorrelation::Correlate, preventing stale
+        /// or meaningless coordinates from surviving alongside an unavailable/range-failure status.
+        static constexpr ClockCorrelationProjection FromValues(
+            const SynchronizedTimestamp& timestamp,
+            const SynchronizationUncertainty& uncertainty,
+            ClockCorrelationProjectionStatus status
+        ) noexcept {
+            switch (status) {
+                case ClockCorrelationProjectionStatus::Correlated:
+                    return ClockCorrelationProjection(
+                        timestamp,
+                        uncertainty,
+                        status
+                    );
+                case ClockCorrelationProjectionStatus::CorrelationUnavailable:
+                case ClockCorrelationProjectionStatus::SynchronizedCoordinateUnderflow:
+                case ClockCorrelationProjectionStatus::SynchronizedCoordinateOverflow:
+                    return ClockCorrelationProjection(
+                        SynchronizedTimestamp(),
+                        SynchronizationUncertainty::Maximum(),
+                        status
+                    );
+            }
+            return ClockCorrelationProjection();
+        }
+
 
         // Value access.
 

@@ -41,7 +41,7 @@ namespace ESPressio::Clock {
         TemporalQualityAssessment _assessment{TemporalQualityAssessment::Unreliable};
 
         /// Explicit zeroed padding keeps the 24-byte representation deterministic.
-        std::uint16_t _reserved{0U};
+        [[maybe_unused]] std::uint16_t _reserved{0U};
 
     public:
 

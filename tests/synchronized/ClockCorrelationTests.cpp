@@ -57,6 +57,36 @@ int main() {
     );
     assert(unavailableProjection.Uncertainty().IsSaturated());
 
+    // Canonical reconstruction preserves correlated values and strips meaningless
+    // coordinate/uncertainty fields from all non-correlated statuses.
+    const auto reconstructed = ESPressio::Clock::ClockCorrelationProjection::FromValues(
+        ESPressio::Clock::SynchronizedTimestamp::FromNanoseconds(456U),
+        ESPressio::Clock::SynchronizationUncertainty::FromNanoseconds(12U),
+        ClockCorrelationProjectionStatus::Correlated
+    );
+    assert(reconstructed.IsCorrelated());
+    assert(reconstructed.Timestamp().Nanoseconds() == 456U);
+    assert(reconstructed.Uncertainty().Nanoseconds() == 12U);
+
+    const auto reconstructedUnavailable =
+        ESPressio::Clock::ClockCorrelationProjection::FromValues(
+            ESPressio::Clock::SynchronizedTimestamp::FromNanoseconds(999U),
+            ESPressio::Clock::SynchronizationUncertainty::FromNanoseconds(1U),
+            ClockCorrelationProjectionStatus::CorrelationUnavailable
+        );
+    assert(!reconstructedUnavailable.IsCorrelated());
+    assert(reconstructedUnavailable.Timestamp().Nanoseconds() == 0U);
+    assert(reconstructedUnavailable.Uncertainty().IsSaturated());
+
+    const auto reconstructedUnderflow =
+        ESPressio::Clock::ClockCorrelationProjection::FromValues(
+            ESPressio::Clock::SynchronizedTimestamp::FromNanoseconds(999U),
+            ESPressio::Clock::SynchronizationUncertainty::FromNanoseconds(1U),
+            ClockCorrelationProjectionStatus::SynchronizedCoordinateUnderflow
+        );
+    assert(reconstructedUnderflow.Timestamp().Nanoseconds() == 0U);
+    assert(reconstructedUnderflow.Uncertainty().IsSaturated());
+
     // Positive rate correction applies equally to forward and backward reference projection.
     const auto positive = Correlation(
         1000000000ULL,
