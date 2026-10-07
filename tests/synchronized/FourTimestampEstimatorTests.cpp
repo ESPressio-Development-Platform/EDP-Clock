@@ -154,6 +154,85 @@ int main() {
     assert(!impossibleDelay.IsAccepted());
     assert(impossibleDelay.Status() == FourTimestampExchangeStatus::RejectedImpossiblePathDelay);
 
+    // A nominal negative path that is no larger than the declared timestamp
+    // uncertainty envelope remains physically compatible with zero path delay.
+    const auto zeroBoundaryOverlap = EstimateFourTimestampExchange(
+        Exchange(
+            100U,
+            1000U,
+            1020U,
+            110U,
+            3U,
+            2U,
+            2U,
+            3U
+        )
+    );
+
+    assert(zeroBoundaryOverlap.IsAccepted());
+    assert(
+        zeroBoundaryOverlap.Status() ==
+        FourTimestampExchangeStatus::Accepted
+    );
+    assert(zeroBoundaryOverlap.RoundTripPathDelayNanoseconds() == 0U);
+    assert(
+        zeroBoundaryOverlap.Observation().
+            ReferenceTimestamp().Nanoseconds() ==
+        1020U
+    );
+    assert(
+        zeroBoundaryOverlap.Observation().
+            Uncertainty().Nanoseconds() ==
+        10U
+    );
+
+    const auto outsideZeroBoundary = EstimateFourTimestampExchange(
+        Exchange(
+            100U,
+            1000U,
+            1021U,
+            110U,
+            3U,
+            2U,
+            2U,
+            3U
+        )
+    );
+
+    assert(!outsideZeroBoundary.IsAccepted());
+    assert(
+        outsideZeroBoundary.Status() ==
+        FourTimestampExchangeStatus::RejectedImpossiblePathDelay
+    );
+
+    // Physical-qualification shape: a 17 us nominal negative path is accepted
+    // because it is far inside the four declared capture/reference bounds.
+    const auto physicalOverlap = EstimateFourTimestampExchange(
+        Exchange(
+            2'337'467'500ULL,
+            3'492'296'000ULL,
+            4'561'349'500ULL,
+            3'406'504'000ULL,
+            275'000U,
+            280'531U,
+            277'613U,
+            275'000U
+        )
+    );
+
+    assert(physicalOverlap.IsAccepted());
+    assert(physicalOverlap.RoundTripPathDelayNanoseconds() == 0U);
+    assert(
+        physicalOverlap.Observation().
+            ReferenceTimestamp().Nanoseconds() ==
+        4'561'349'500ULL
+    );
+    assert(
+        physicalOverlap.Observation().
+            Uncertainty().Nanoseconds() ==
+        1'108'144U
+    );
+
     const auto referenceOverflow = EstimateFourTimestampExchange(
         Exchange(
             0U,

@@ -253,11 +253,27 @@ An exchange is rejected when:
 ```text
 T4 < T1
 T3 < T2
-remoteTurnaround > localElapsed
+the nominal negative path lies wholly outside the declared timestamp-uncertainty envelope
 T3 + estimatedReturn cannot be represented
 ```
 
-The corresponding `FourTimestampExchangeStatus` makes the rejection reason explicit.
+The path-feasibility check is interval-aware. Define:
+
+```text
+nominalPath = localElapsed - remoteTurnaround
+timestampEnvelope =
+    U(T1) + U(T2) + U(T3) + U(T4)
+```
+
+If `nominalPath >= 0`, the ordinary non-negative path reduction is used. If the nominal path is negative, Clock compares its magnitude with the combined timestamp uncertainty. A negative nominal path is rejected only when:
+
+```text
+abs(nominalPath) > timestampEnvelope
+```
+
+When the negative nominal path still overlaps the physically valid zero-delay boundary within the declared uncertainty, the estimator accepts the exchange conservatively with `pathRoundTrip = 0`. It does **not** manufacture a negative or positive transport delay from uncertain evidence. The full supplied timestamp uncertainty continues into the resulting observation.
+
+The corresponding `FourTimestampExchangeStatus` makes hard rejection reasons explicit.
 
 ### Path asymmetry and uncertainty
 

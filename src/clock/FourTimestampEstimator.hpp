@@ -79,18 +79,44 @@ namespace ESPressio::Clock {
         const auto localElapsed = localReceive - localTransmit;
         const auto remoteTurnaround = remoteTransmit - remoteReceive;
 
-        if (remoteTurnaround > localElapsed)
-            return FourTimestampExchangeResult(
-                SynchronizationObservation(
-                    MonotonicTimestamp::FromNanoseconds(0U),
-                    SynchronizedTimestamp::FromNanoseconds(0U),
-                    SynchronizationUncertainty::Maximum()
-                ),
-                0U,
-                FourTimestampExchangeStatus::RejectedImpossiblePathDelay
+        const auto timestampUncertaintyEnvelope =
+            static_cast<std::uint64_t>(
+                exchange.LocalTransmitUncertainty().Nanoseconds()
+            ) +
+            static_cast<std::uint64_t>(
+                exchange.RemoteReceiveUncertainty().Nanoseconds()
+            ) +
+            static_cast<std::uint64_t>(
+                exchange.RemoteTransmitUncertainty().Nanoseconds()
+            ) +
+            static_cast<std::uint64_t>(
+                exchange.LocalReceiveUncertainty().Nanoseconds()
             );
 
-        const auto roundTripPathDelay = localElapsed - remoteTurnaround;
+        std::uint64_t roundTripPathDelay{0U};
+
+        if (remoteTurnaround > localElapsed) {
+            const auto nominalPathDeficit =
+                remoteTurnaround - localElapsed;
+
+            if (nominalPathDeficit > timestampUncertaintyEnvelope)
+                return FourTimestampExchangeResult(
+                    SynchronizationObservation(
+                        MonotonicTimestamp::FromNanoseconds(0U),
+                        SynchronizedTimestamp::FromNanoseconds(0U),
+                        SynchronizationUncertainty::Maximum()
+                    ),
+                    0U,
+                    FourTimestampExchangeStatus::RejectedImpossiblePathDelay
+                );
+
+            // The declared timestamp intervals still overlap a physically valid
+            // zero-delay boundary. Do not manufacture a negative path; retain
+            // the full supplied timestamp uncertainty below.
+            roundTripPathDelay = 0U;
+        } else {
+            roundTripPathDelay = localElapsed - remoteTurnaround;
+        }
         const auto estimatedReversePathDelay = roundTripPathDelay / 2U;
 
         if (estimatedReversePathDelay > (std::numeric_limits<std::uint64_t>::max() - remoteTransmit))
