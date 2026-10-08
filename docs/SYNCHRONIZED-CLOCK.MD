@@ -687,3 +687,30 @@ SynchronizedNow()
 Default policy is strict sub-millisecond synchronization (`uncertainty < 1 ms`), ±1,000 ppm long-term correction, and ±5,000 ppm temporary phase slew.
 
 The implementation remains source-agnostic, transport-agnostic in its mathematics, calendar-agnostic, heap-free, and safe for concurrent readers under the single-writer discipline contract. Transport libraries acquire/carry timestamps; they do not own duplicate Clock discipline or four-timestamp reduction algorithms.
+
+## H284: Optional Longer-Span Frequency Evidence
+
+The default SynchronizedClockProvider behaviour remains unchanged: frequency
+correction and its uncertainty derive from adjacent accepted observations.
+The fixed 48-byte ConcurrentSnapshot representation, Composition properties
+and existing source/consumer method contracts remain unchanged.
+
+The optional sixth template parameter
+TMinimumFrequencyEvidenceSpanNanoseconds (default 0) selects a minimum
+time separation between independent rate-estimation anchors. A Mesh
+application can use 5000000000ULL (five seconds). Each accepted observation
+still immediately updates phase and reference state, but rate correction
+AND its error bound are recomputed only using two anchors separated by
+the full configured interval. One writer-owned fixed record holds the
+starting anchor; era transitions reset it. No heap allocation or wire
+change is introduced.
+
+From H283 physical NRF24 diagnostics, adjacent approximately 1-second
+observations each with about 300 us uncertainty generated about 620,000 ppb
+frequency uncertainty; with two observations at least five seconds apart
+that same conservative pair may support about 120,000 ppb. This reduces
+projected uncertainty growth only when the underlying oscillator remains
+stable over the chosen window. Longer windows can under-model transient
+drift: qualification against independent measured clock deviation remains
+mandatory, and the unchanged strict 1ms ceiling must never be weakened.
+Long radio interruptions can still cause genuine Holdover.

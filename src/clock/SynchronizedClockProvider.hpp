@@ -414,6 +414,17 @@ namespace ESPressio::Clock {
     } // ESPressio::Clock::Detail
 
 
+    /// Writer-owned optional reference pair for longer-span frequency evidence.
+    /// Neither consumers nor ConcurrentSnapshot readers access this record.
+    struct FrequencyEvidenceBaseline final {
+        std::uint64_t MonotonicNanoseconds{0U};
+        std::uint64_t ReferenceNanoseconds{0U};
+        std::uint32_t ObservationUncertaintyNanoseconds{0U};
+        bool Available{false};
+    };
+
+    struct NoFrequencyEvidence final {};
+
     /// Generic synchronized clock disciplined from source-agnostic synchronization observations.
     ///
     /// The synchronized clock is derived entirely from the selected MonotonicClock. It owns no
@@ -429,12 +440,17 @@ namespace ESPressio::Clock {
     /// @tparam TMaximumFrequencyCorrectionPartsPerBillion Maximum long-term correction magnitude.
     /// @tparam TMaximumPhaseSlewPartsPerBillion Maximum temporary phase-slew magnitude.
     /// @tparam TSynchronizationUncertaintyLimitNanoseconds Exclusive synchronization-quality limit.
+    /// @tparam TMinimumFrequencyEvidenceSpanNanoseconds Optional minimum interval
+    /// between rate-estimation anchors. Zero preserves legacy adjacent evidence.
+    /// Nonzero assumes source oscillator frequency is sufficiently stable across
+    /// this interval; integrators must qualify that physical assumption.
     template<
         class TMonotonicClockProvider,
         class TAtomicWordProvider,
         std::uint32_t TMaximumFrequencyCorrectionPartsPerBillion = 1000000U,
         std::uint32_t TMaximumPhaseSlewPartsPerBillion = 5000000U,
-        std::uint32_t TSynchronizationUncertaintyLimitNanoseconds = 1000000U
+        std::uint32_t TSynchronizationUncertaintyLimitNanoseconds = 1000000U,
+        std::uint64_t TMinimumFrequencyEvidenceSpanNanoseconds = 0ULL
     >
     class SynchronizedClockProvider final : public Framework::Provider<
         Domain,
@@ -532,6 +548,12 @@ namespace ESPressio::Clock {
             "MonotonicClock resolution must fit in synchronized uncertainty storage"
         );
 
+        static_assert(
+            TMinimumFrequencyEvidenceSpanNanoseconds == 0ULL ||
+            TMinimumFrequencyEvidenceSpanNanoseconds >= 1000000000ULL,
+            "Opt-in rate-estimation span must be at least one second"
+        );
+
         // Clock dependencies and discipline state.
 
         /// Borrowed lifetime-stable monotonic clock selected by application Bootstrap.
@@ -539,6 +561,21 @@ namespace ESPressio::Clock {
 
         /// Coherently published mutable synchronized-clock discipline state.
         StateSnapshot _state;
+
+        /// Zero-cost empty storage in the legacy policy; fixed writer-owned
+        /// anchors only in the opt-in longer frequency evidence mode.
+        using FrequencyStorage = std::conditional_t<
+            TMinimumFrequencyEvidenceSpanNanoseconds == 0ULL,
+            NoFrequencyEvidence,
+            FrequencyEvidenceBaseline
+        >;
+        [[no_unique_address]] FrequencyStorage _frequencyEvidence{};
+
+        void ResetFrequencyEvidence() noexcept {
+            if constexpr (TMinimumFrequencyEvidenceSpanNanoseconds != 0ULL) {
+                _frequencyEvidence = {};
+            }
+        }
 
 
         // State initialization.
@@ -779,6 +816,11 @@ namespace ESPressio::Clock {
         static constexpr std::uint32_t MaximumPhaseSlewPartsPerBillion =
             TMaximumPhaseSlewPartsPerBillion;
 
+        /// Zero means the original adjacent-observation rate estimator.
+        /// Positive values select the opt-in longer-span evidence window.
+        static constexpr std::uint64_t MinimumFrequencyEvidenceSpanNanoseconds =
+            TMinimumFrequencyEvidenceSpanNanoseconds;
+
         /// Consumer state bytes retained inside one ConcurrentSnapshot buffer.
         static constexpr std::size_t DisciplineStateBytes = sizeof(Detail::SynchronizedClockState);
 
@@ -841,6 +883,7 @@ namespace ESPressio::Clock {
         /// conservatively marked Reacquiring until new same-era evidence is accepted. If no
         /// authoritative published timeline exists, provisional observation state is discarded.
         ClockDisciplineTransitionStatus BeginSameEraTransition() noexcept {
+            ResetFrequencyEvidence();
             auto state = _state.Read();
 
             if (state.HasPublishedTimeline == 0U) {
@@ -870,6 +913,7 @@ namespace ESPressio::Clock {
         ClockDisciplineTransitionStatus BeginCrossEraTransition(
             CrossEraTransitionMode mode
         ) noexcept {
+            ResetFrequencyEvidence();
             if (mode == CrossEraTransitionMode::ReconstructTimeline) {
                 _state.Publish(InitialState());
                 return ClockDisciplineTransitionStatus::Applied;
@@ -940,35 +984,77 @@ namespace ESPressio::Clock {
             auto nextFrequencyCorrection = currentState.FrequencyCorrectionPartsPerBillion;
             auto nextFrequencyUncertainty = currentState.FrequencyUncertaintyPartsPerBillion;
 
-            if (
-                (currentState.HasObservation != 0U) &&
-                (observationMonotonic > currentState.MonotonicAnchorNanoseconds)
-            ) {
-                const auto localDelta = observationMonotonic - currentState.MonotonicAnchorNanoseconds;
-                const auto currentReference = observation.ReferenceTimestamp().Nanoseconds();
+            // Default: preserve the original consecutive-sample frequency
+            // estimator exactly. Opt-in: keep a separate older writer-only
+            // reference pair for rate correction AND rate uncertainty, while
+            // continuing to accept every phase observation without delay.
+            [[maybe_unused]] bool completedFrequencyEvidenceSpan = false;
+            if constexpr (TMinimumFrequencyEvidenceSpanNanoseconds == 0ULL) {
+                if (
+                    (currentState.HasObservation != 0U) &&
+                    (observationMonotonic > currentState.MonotonicAnchorNanoseconds)
+                ) {
+                    const auto localDelta = observationMonotonic - currentState.MonotonicAnchorNanoseconds;
+                    const auto currentReference = observation.ReferenceTimestamp().Nanoseconds();
 
-                if (currentReference < currentState.ReferenceAnchorNanoseconds) {
-                    DegradeForRejectedFrequency(currentState);
-                    return SynchronizationObservationStatus::RejectedFrequencyCorrection;
+                    if (currentReference < currentState.ReferenceAnchorNanoseconds) {
+                        DegradeForRejectedFrequency(currentState);
+                        return SynchronizationObservationStatus::RejectedFrequencyCorrection;
+                    }
+
+                    const auto referenceDelta = currentReference - currentState.ReferenceAnchorNanoseconds;
+
+                    if (!Detail::EstimateFrequencyCorrection(
+                        localDelta,
+                        referenceDelta,
+                        TMaximumFrequencyCorrectionPartsPerBillion,
+                        nextFrequencyCorrection
+                    )) {
+                        DegradeForRejectedFrequency(currentState);
+                        return SynchronizationObservationStatus::RejectedFrequencyCorrection;
+                    }
+
+                    nextFrequencyUncertainty = Detail::EstimateFrequencyUncertainty(
+                        currentState.UncertaintyAtAnchorNanoseconds,
+                        currentObservationUncertainty,
+                        localDelta
+                    );
                 }
 
-                const auto referenceDelta = currentReference - currentState.ReferenceAnchorNanoseconds;
+            } else {
+                if (
+                    _frequencyEvidence.Available &&
+                    observationMonotonic > _frequencyEvidence.MonotonicNanoseconds &&
+                    observationMonotonic - _frequencyEvidence.MonotonicNanoseconds >=
+                        TMinimumFrequencyEvidenceSpanNanoseconds
+                ) {
+                    const auto currentReference =
+                        observation.ReferenceTimestamp().Nanoseconds();
+                    if (currentReference < _frequencyEvidence.ReferenceNanoseconds) {
+                        DegradeForRejectedFrequency(currentState);
+                        return SynchronizationObservationStatus::RejectedFrequencyCorrection;
+                    }
 
-                if (!Detail::EstimateFrequencyCorrection(
-                    localDelta,
-                    referenceDelta,
-                    TMaximumFrequencyCorrectionPartsPerBillion,
-                    nextFrequencyCorrection
-                )) {
-                    DegradeForRejectedFrequency(currentState);
-                    return SynchronizationObservationStatus::RejectedFrequencyCorrection;
+                    const auto localDelta =
+                        observationMonotonic - _frequencyEvidence.MonotonicNanoseconds;
+                    const auto referenceDelta =
+                        currentReference - _frequencyEvidence.ReferenceNanoseconds;
+                    if (!Detail::EstimateFrequencyCorrection(
+                        localDelta,
+                        referenceDelta,
+                        TMaximumFrequencyCorrectionPartsPerBillion,
+                        nextFrequencyCorrection
+                    )) {
+                        DegradeForRejectedFrequency(currentState);
+                        return SynchronizationObservationStatus::RejectedFrequencyCorrection;
+                    }
+                    nextFrequencyUncertainty = Detail::EstimateFrequencyUncertainty(
+                        _frequencyEvidence.ObservationUncertaintyNanoseconds,
+                        currentObservationUncertainty,
+                        localDelta
+                    );
+                    completedFrequencyEvidenceSpan = true;
                 }
-
-                nextFrequencyUncertainty = Detail::EstimateFrequencyUncertainty(
-                    currentState.UncertaintyAtAnchorNanoseconds,
-                    currentObservationUncertainty,
-                    localDelta
-                );
             }
 
             Detail::SynchronizedClockState nextState {};
@@ -980,6 +1066,17 @@ namespace ESPressio::Clock {
                 : nextFrequencyUncertainty;
             nextState.UncertaintyAtAnchorNanoseconds = currentObservationUncertainty;
             nextState.HasObservation = 1U;
+
+            if constexpr (TMinimumFrequencyEvidenceSpanNanoseconds != 0ULL) {
+                if (!_frequencyEvidence.Available || completedFrequencyEvidenceSpan) {
+                    _frequencyEvidence = FrequencyEvidenceBaseline{
+                        observationMonotonic,
+                        observation.ReferenceTimestamp().Nanoseconds(),
+                        currentObservationUncertainty,
+                        true
+                    };
+                }
+            }
 
             const auto hasEverSynchronized = currentState.HasPublishedTimeline != 0U;
 

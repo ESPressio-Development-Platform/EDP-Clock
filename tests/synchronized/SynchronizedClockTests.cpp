@@ -243,10 +243,122 @@ namespace {
         )>
     > : std::true_type {};
 
+    /// H284: model fixed 300-us radio-derived observation uncertainty. Using
+    /// adjacent one-second samples keeps a roughly 600,000 ppb rate error;
+    /// a five-second reference pair bounds the same rate evidence near 120,000.
+    /// Both modes still consume every phase observation and preserve 1 ms policy.
+    void TestOptionalLongerRateEvidence() {
+        using namespace ESPressio::Clock;
+        using WindowedClock = SynchronizedClockProvider<
+            MonotonicClock,
+            TestAtomicWord32Provider,
+            1000000U,
+            5000000U,
+            1000000U,
+            5000000000ULL
+        >;
+
+        static_assert(
+            WindowedClock::MinimumFrequencyEvidenceSpanNanoseconds ==
+                5000000000ULL
+        );
+        static_assert(
+            SynchronizedClock::MinimumFrequencyEvidenceSpanNanoseconds == 0ULL
+        );
+        static_assert(
+            WindowedClock::DisciplineStateBytes ==
+            SynchronizedClock::DisciplineStateBytes
+        );
+        static_assert(
+            WindowedClock::ConcurrentStateStorageBytes ==
+            SynchronizedClock::ConcurrentStateStorageBytes
+        );
+
+        TestTimebase timebase;
+        MonotonicClock monotonic(timebase);
+        SynchronizedClock adjacent(monotonic);
+        WindowedClock windowed(monotonic);
+        constexpr std::uint64_t referenceOffset = 10000000000ULL;
+        constexpr std::uint64_t observationUncertainty = 300000ULL;
+
+        for (std::uint64_t second = 1U; second <= 13U; ++second) {
+            const auto local = second * 1000000000ULL;
+            const auto noisyReference = local + referenceOffset +
+                (second % 2U == 0U ? 25000ULL : 0ULL);
+            timebase.Set(local);
+            const auto sample = Observation(
+                local,
+                noisyReference,
+                observationUncertainty
+            );
+            assert(
+                adjacent.Observe(sample) ==
+                SynchronizationObservationStatus::Accepted
+            );
+            assert(
+                windowed.Observe(sample) ==
+                SynchronizationObservationStatus::Accepted
+            );
+        }
+
+        assert(
+            adjacent.Correlation().FrequencyUncertaintyPartsPerBillion() >
+            500000U
+        );
+        assert(
+            windowed.Correlation().FrequencyUncertaintyPartsPerBillion() <
+            130000U
+        );
+
+        // Simulate an interrupted physical sample at 1.5 s after last
+        // accepted evidence; the conservative adjacent rate causes Holdover.
+        timebase.Set(14500000000ULL);
+        const auto adjacentReading = adjacent.Now();
+        const auto windowedReading = windowed.Now();
+        assert(
+            adjacentReading.State() == SynchronizationState::Holdover
+        );
+        assert(
+            adjacentReading.Uncertainty().Nanoseconds() >= 1000000U
+        );
+        assert(
+            windowedReading.State() == SynchronizationState::Synchronized
+        );
+        assert(
+            windowedReading.Uncertainty().Nanoseconds() < 1000000U
+        );
+
+        // A different era discards the writer-only rate baseline; the next
+        // stable five-second span must establish a fresh conservative rate.
+        assert(
+            windowed.BeginCrossEraTransition(
+                CrossEraTransitionMode::ReconstructTimeline
+            ) == ClockDisciplineTransitionStatus::Applied
+        );
+        for (std::uint64_t second = 20U; second <= 25U; ++second) {
+            const auto local = second * 1000000000ULL;
+            timebase.Set(local);
+            assert(
+                windowed.Observe(
+                    Observation(
+                        local,
+                        local + referenceOffset,
+                        observationUncertainty
+                    )
+                ) == SynchronizationObservationStatus::Accepted
+            );
+        }
+        assert(
+            windowed.Correlation().FrequencyUncertaintyPartsPerBillion() <
+            130000U
+        );
+    }
+
 } // anonymous namespace
 
 
 int main() {
+    TestOptionalLongerRateEvidence();
     using ESPressio::Clock::ClockDisciplineTransitionStatus;
     using ESPressio::Clock::CrossEraTransitionMode;
     using ESPressio::Clock::SynchronizationObservationStatus;
