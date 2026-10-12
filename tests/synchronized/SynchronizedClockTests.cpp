@@ -811,6 +811,80 @@ int main() {
         5'000'000'000ULL,13'100'000'000ULL,0U
     )) == SynchronizationObservationStatus::Accepted);
 
+    // H318 F03 RED: a perfect oscillator with alternating bounded
+    // measurement phase noise must not be disciplined into fictitious drift.
+    TestTimebase noisyTimebase;
+    MonotonicClock noisyMonotonic(noisyTimebase);
+    SynchronizedClock noisyClock(noisyMonotonic);
+    noisyTimebase.Set(1'000'000'000ULL);
+    assert(noisyClock.Observe(Observation(
+        1'000'000'000ULL,10'000'000'000ULL,700'000U
+    )) == SynchronizationObservationStatus::Accepted);
+    noisyTimebase.Set(2'000'000'000ULL);
+    assert(noisyClock.Observe(Observation(
+        2'000'000'000ULL,11'001'200'000ULL,700'000U
+    )) == SynchronizationObservationStatus::Accepted);
+    assert(noisyClock.Correlation().FrequencyCorrectionPartsPerBillion() == 0);
+
+    // H318 F08 RED: an invalid tentative cross-era observation is rejected
+    // without ever destroying the original published timeline/correlation.
+    TestTimebase atomicEraTimebase;
+    MonotonicClock atomicEraMonotonic(atomicEraTimebase);
+    SynchronizedClock atomicEraClock(atomicEraMonotonic);
+    atomicEraTimebase.Set(1'000'000'000ULL);
+    assert(atomicEraClock.Observe(Observation(
+        1'000'000'000ULL,11'000'000'000ULL,0U
+    )) == SynchronizationObservationStatus::Accepted);
+    const auto atomicEraBefore = atomicEraClock.Now();
+    const auto atomicCorrBefore = atomicEraClock.Correlation();
+    assert(atomicEraClock.ObserveFromNewEraSource(
+        Observation(2'000'000'000ULL,20'000'000'000ULL,0U),
+        CrossEraTransitionMode::PreservePublishedTimeline
+    ) == SynchronizationObservationStatus::RejectedFutureObservation);
+    assert(atomicEraClock.Now().Timestamp().Nanoseconds() ==
+        atomicEraBefore.Timestamp().Nanoseconds());
+    assert(atomicEraClock.Correlation().IsAvailable());
+    assert(atomicEraClock.Correlation().MonotonicAnchor() ==
+        atomicCorrBefore.MonotonicAnchor());
+    assert(atomicEraClock.ObserveFromNewEraSource(
+        Observation(999'999'999ULL,20'000'000'000ULL,0U),
+        CrossEraTransitionMode::ReconstructTimeline
+    ) == SynchronizationObservationStatus::RejectedOutOfOrderObservation);
+    assert(atomicEraClock.Correlation().MonotonicAnchor() ==
+        atomicCorrBefore.MonotonicAnchor());
+    assert(atomicEraClock.ObserveFromNewEraSource(
+        Observation(1'000'000'000ULL,100U,0U),
+        CrossEraTransitionMode::PreservePublishedTimeline
+    ) == SynchronizationObservationStatus::Accepted);
+    assert(atomicEraClock.Now().Timestamp().Nanoseconds() >=
+        atomicEraBefore.Timestamp().Nanoseconds());
+    assert(atomicEraClock.ObserveFromNewEraSource(
+        Observation(1'000'000'000ULL,300U,0U),
+        CrossEraTransitionMode::ReconstructTimeline
+    ) == SynchronizationObservationStatus::Accepted);
+    assert(atomicEraClock.Now().Timestamp().Nanoseconds() == 300U);
+
+    // H318 F08: a delayed new-era observation must not make public time
+    // regress at acceptance when the OLD oscillator correction is nonzero.
+    TestTimebase delayedEraTimebase;
+    MonotonicClock delayedEraMonotonic(delayedEraTimebase);
+    SynchronizedClock delayedEraClock(delayedEraMonotonic);
+    delayedEraTimebase.Set(1'000'000'000ULL);
+    assert(delayedEraClock.Observe(Observation(
+        1'000'000'000ULL,11'000'000'000ULL,0U
+    )) == SynchronizationObservationStatus::Accepted);
+    delayedEraTimebase.Set(2'000'000'000ULL);
+    assert(delayedEraClock.Observe(Observation(
+        2'000'000'000ULL,12'000'200'000ULL,0U
+    )) == SynchronizationObservationStatus::Accepted);
+    delayedEraTimebase.Set(4'000'000'000ULL);
+    const auto beforeDelayedEra = delayedEraClock.Now().Timestamp().Nanoseconds();
+    assert(delayedEraClock.ObserveFromNewEraSource(
+        Observation(3'000'000'000ULL,500U,0U),
+        CrossEraTransitionMode::PreservePublishedTimeline
+    ) == SynchronizationObservationStatus::Accepted);
+    assert(delayedEraClock.Now().Timestamp().Nanoseconds() >= beforeDelayedEra);
+
     // Cross-era preservation invalidates old reference correlation while keeping the public clock
     // non-regressing, even when the new era starts behind the previously published coordinate.
     TestTimebase preservedEraTimebase;
