@@ -108,8 +108,10 @@ namespace ESPressio::Clock {
             /// Indicates whether synchronized time has ever become authoritative in this timeline.
             std::uint8_t HasPublishedTimeline;
 
-            /// Reserved zeroed storage keeps the 48-byte snapshot representation fully explicit.
-            std::uint8_t Reserved;
+            /// Validity of the adjacent-observation frequency baseline.
+            /// Separate from HasObservation so a source change preserves
+            /// the published correlation without reusing old parent's rate.
+            std::uint8_t RateEvidenceValid;
 
         };
 
@@ -588,6 +590,7 @@ namespace ESPressio::Clock {
             state.UncertaintyAtAnchorNanoseconds = std::numeric_limits<std::uint32_t>::max();
             state.State = SynchronizationState::NeverSynchronized;
             state.HasObservation = 0U;
+            state.RateEvidenceValid = 0U;
             state.HasPublishedTimeline = 0U;
             return state;
         }
@@ -899,6 +902,14 @@ namespace ESPressio::Clock {
             if (state.State != SynchronizationState::LostSynchronization)
                 state.State = SynchronizationState::Reacquiring;
 
+            // A parent loss also invalidates the adjacent-sample rate pair.
+            // Keep the published coordinate/phase/rate projection alive until
+            // a replacement observation is accepted, but never compare its
+            // reference timestamp with this previous source's observation.
+            state.RateEvidenceValid = 0U;
+            state.FrequencyUncertaintyPartsPerBillion =
+                TMaximumFrequencyCorrectionPartsPerBillion;
+
             _state.Publish(state);
             return ClockDisciplineTransitionStatus::Applied;
         }
@@ -962,8 +973,15 @@ namespace ESPressio::Clock {
         ///
         /// @param observation Accepted upstream estimate relating monotonic and synchronized time.
         /// @return Status describing whether the observation was accepted by Clock discipline.
-        SynchronizationObservationStatus Observe(
-            const SynchronizationObservation& observation
+    private:
+        // A prospective same-era parent adoption must be atomic: rejected
+        // observations leave both the incumbent mapping and its frequency
+        // evidence untouched. The first accepted new-source observation
+        // establishes its own baseline without comparing against old-source
+        // rate data. The published timeline remains slew-only.
+        SynchronizationObservationStatus ObserveInternal(
+            const SynchronizationObservation& observation,
+            bool newSameEraSource
         ) noexcept {
             const auto currentMonotonic = _monotonicClock->Now();
 
@@ -981,8 +999,14 @@ namespace ESPressio::Clock {
             }
 
             const auto currentObservationUncertainty = ObservationUncertainty(observation);
-            auto nextFrequencyCorrection = currentState.FrequencyCorrectionPartsPerBillion;
-            auto nextFrequencyUncertainty = currentState.FrequencyUncertaintyPartsPerBillion;
+            auto nextFrequencyCorrection =
+                newSameEraSource || currentState.RateEvidenceValid == 0U
+                    ? 0
+                    : currentState.FrequencyCorrectionPartsPerBillion;
+            auto nextFrequencyUncertainty =
+                newSameEraSource || currentState.RateEvidenceValid == 0U
+                    ? TMaximumFrequencyCorrectionPartsPerBillion
+                    : currentState.FrequencyUncertaintyPartsPerBillion;
 
             // Default: preserve the original consecutive-sample frequency
             // estimator exactly. Opt-in: keep a separate older writer-only
@@ -991,7 +1015,8 @@ namespace ESPressio::Clock {
             [[maybe_unused]] bool completedFrequencyEvidenceSpan = false;
             if constexpr (TMinimumFrequencyEvidenceSpanNanoseconds == 0ULL) {
                 if (
-                    (currentState.HasObservation != 0U) &&
+                    !newSameEraSource &&
+                    (currentState.RateEvidenceValid != 0U) &&
                     (observationMonotonic > currentState.MonotonicAnchorNanoseconds)
                 ) {
                     const auto localDelta = observationMonotonic - currentState.MonotonicAnchorNanoseconds;
@@ -1023,6 +1048,7 @@ namespace ESPressio::Clock {
 
             } else {
                 if (
+                    !newSameEraSource &&
                     _frequencyEvidence.Available &&
                     observationMonotonic > _frequencyEvidence.MonotonicNanoseconds &&
                     observationMonotonic - _frequencyEvidence.MonotonicNanoseconds >=
@@ -1061,13 +1087,17 @@ namespace ESPressio::Clock {
             nextState.MonotonicAnchorNanoseconds = observationMonotonic;
             nextState.ReferenceAnchorNanoseconds = observation.ReferenceTimestamp().Nanoseconds();
             nextState.FrequencyCorrectionPartsPerBillion = nextFrequencyCorrection;
-            nextState.FrequencyUncertaintyPartsPerBillion = currentState.HasObservation == 0U
-                ? TMaximumFrequencyCorrectionPartsPerBillion
-                : nextFrequencyUncertainty;
+            nextState.FrequencyUncertaintyPartsPerBillion =
+                newSameEraSource || currentState.RateEvidenceValid == 0U
+                    ? TMaximumFrequencyCorrectionPartsPerBillion
+                    : nextFrequencyUncertainty;
             nextState.UncertaintyAtAnchorNanoseconds = currentObservationUncertainty;
             nextState.HasObservation = 1U;
+            // This sample is the first valid future frequency baseline.
+            nextState.RateEvidenceValid = 1U;
 
             if constexpr (TMinimumFrequencyEvidenceSpanNanoseconds != 0ULL) {
+                if (newSameEraSource) ResetFrequencyEvidence();
                 if (!_frequencyEvidence.Available || completedFrequencyEvidenceSpan) {
                     _frequencyEvidence = FrequencyEvidenceBaseline{
                         observationMonotonic,
@@ -1118,6 +1148,26 @@ namespace ESPressio::Clock {
 
             _state.Publish(nextState);
             return SynchronizationObservationStatus::Accepted;
+        }
+
+    public:
+        /// Accepts an observation from the existing source/parent.
+        SynchronizationObservationStatus Observe(
+            const SynchronizationObservation& observation
+        ) noexcept {
+            return ObserveInternal(observation,false);
+        }
+
+        /// Atomically adopts a same-era source's first accepted observation.
+        ///
+        /// Rejected candidates do not mutate the current parent discipline.
+        /// An accepted candidate retains the non-regressing published time
+        /// coordinate but discards rate *evidence* associated with the old
+        /// parent. The next observation establishes new-source frequency.
+        SynchronizationObservationStatus ObserveFromNewSameEraSource(
+            const SynchronizationObservation& observation
+        ) noexcept {
+            return ObserveInternal(observation,true);
         }
 
     };
