@@ -386,6 +386,50 @@ namespace ESPressio::Clock {
             return true;
         }
 
+        /// Distinguish real oscillator drift from phase-measurement noise.
+        ///
+        /// A reference-delta difference up to the SUM of the two observation
+        /// uncertainties is compatible with a perfect oscillator. It cannot
+        /// justify imposing that apparent rate on the disciplined Clock.
+        /// Correct only the portion that is outside the permitted phase-error
+        /// interval; an unambiguously excessive rate remains rejected.
+        inline bool EstimateFrequencyCorrectionFromBounds(
+            std::uint64_t localDelta,
+            std::uint64_t referenceDelta,
+            std::uint32_t previousUncertainty,
+            std::uint32_t currentUncertainty,
+            std::uint32_t maximumCorrection,
+            std::int32_t incumbentCorrection,
+            std::int32_t& output
+        ) noexcept {
+            const auto noise = static_cast<std::uint64_t>(previousUncertainty)
+                + static_cast<std::uint64_t>(currentUncertainty);
+            const bool faster = referenceDelta >= localDelta;
+            const auto difference = faster
+                ? referenceDelta - localDelta
+                : localDelta - referenceDelta;
+            if (difference <= noise) {
+                output = incumbentCorrection;
+                return true;
+            }
+            // When measurement uncertainty is negligible compared with
+            // observed drift, preserve the original exact frequency result
+            // rather than systematically biasing it toward zero.
+            if (noise <= difference / 16U) {
+                return EstimateFrequencyCorrection(
+                    localDelta,referenceDelta,maximumCorrection,output
+                );
+            }
+            const auto attributableDifference = difference - noise;
+            if (attributableDifference >= localDelta) return false;
+            const auto evidenceReferenceDelta = faster
+                ? localDelta + attributableDifference
+                : localDelta - attributableDifference;
+            return EstimateFrequencyCorrection(
+                localDelta,evidenceReferenceDelta,maximumCorrection,output
+            );
+        }
+
         /// Estimates frequency uncertainty from the uncertainty of two observation coordinates.
         inline std::uint32_t EstimateFrequencyUncertainty(
             std::uint32_t previousUncertaintyNanoseconds,
@@ -981,7 +1025,9 @@ namespace ESPressio::Clock {
         // rate data. The published timeline remains slew-only.
         SynchronizationObservationStatus ObserveInternal(
             const SynchronizationObservation& observation,
-            bool newSameEraSource
+            bool newSameEraSource,
+            bool newCrossEraSource,
+            CrossEraTransitionMode crossEraMode
         ) noexcept {
             const auto currentMonotonic = _monotonicClock->Now();
 
@@ -990,6 +1036,43 @@ namespace ESPressio::Clock {
 
             auto currentState = _state.Read();
             const auto observationMonotonic = observation.LocalTimestamp().Nanoseconds();
+
+            // A new era never implies that the *local physical monotonic*
+            // timer may run backward. Validate against the live incumbent
+            // before staging a reconstructed or preserved public mapping.
+            if (
+                newCrossEraSource &&
+                currentState.HasObservation != 0U &&
+                observationMonotonic < currentState.MonotonicAnchorNanoseconds
+            ) {
+                return SynchronizationObservationStatus::RejectedOutOfOrderObservation;
+            }
+
+            // A prospective cross-era adoption is staged in local memory.
+            // Do not mutate the incumbent Clock or its optional frequency
+            // baseline until the candidate has actually been accepted.
+            if (newCrossEraSource) {
+                const auto incumbent = currentState;
+                currentState = InitialState();
+                if (
+                    crossEraMode == CrossEraTransitionMode::PreservePublishedTimeline &&
+                    incumbent.HasPublishedTimeline != 0U
+                ) {
+                    // Preserve public time at *acceptance*, not at the
+                    // potentially delayed candidate-capture occurrence.
+                    // Otherwise losing the incumbent's positive rate
+                    // correction over that delay can step Now backwards.
+                    const auto commitMonotonic = currentMonotonic.Nanoseconds();
+                    const auto projection = Project(incumbent,commitMonotonic);
+                    currentState.MonotonicAnchorNanoseconds = commitMonotonic;
+                    currentState.SynchronizedAnchorNanoseconds =
+                        projection.TimestampNanoseconds;
+                    currentState.HasPublishedTimeline = 1U;
+                    currentState.State = SynchronizationState::LostSynchronization;
+                    currentState.UncertaintyAtAnchorNanoseconds =
+                        std::numeric_limits<std::uint32_t>::max();
+                }
+            }
 
             if (
                 (currentState.HasObservation != 0U) &&
@@ -1000,11 +1083,13 @@ namespace ESPressio::Clock {
 
             const auto currentObservationUncertainty = ObservationUncertainty(observation);
             auto nextFrequencyCorrection =
-                newSameEraSource || currentState.RateEvidenceValid == 0U
+                (newSameEraSource || newCrossEraSource) ||
+                    currentState.RateEvidenceValid == 0U
                     ? 0
                     : currentState.FrequencyCorrectionPartsPerBillion;
             auto nextFrequencyUncertainty =
-                newSameEraSource || currentState.RateEvidenceValid == 0U
+                (newSameEraSource || newCrossEraSource) ||
+                    currentState.RateEvidenceValid == 0U
                     ? TMaximumFrequencyCorrectionPartsPerBillion
                     : currentState.FrequencyUncertaintyPartsPerBillion;
 
@@ -1015,7 +1100,7 @@ namespace ESPressio::Clock {
             [[maybe_unused]] bool completedFrequencyEvidenceSpan = false;
             if constexpr (TMinimumFrequencyEvidenceSpanNanoseconds == 0ULL) {
                 if (
-                    !newSameEraSource &&
+                    !newSameEraSource && !newCrossEraSource &&
                     (currentState.RateEvidenceValid != 0U) &&
                     (observationMonotonic > currentState.MonotonicAnchorNanoseconds)
                 ) {
@@ -1029,10 +1114,13 @@ namespace ESPressio::Clock {
 
                     const auto referenceDelta = currentReference - currentState.ReferenceAnchorNanoseconds;
 
-                    if (!Detail::EstimateFrequencyCorrection(
+                    if (!Detail::EstimateFrequencyCorrectionFromBounds(
                         localDelta,
                         referenceDelta,
+                        currentState.UncertaintyAtAnchorNanoseconds,
+                        currentObservationUncertainty,
                         TMaximumFrequencyCorrectionPartsPerBillion,
+                        nextFrequencyCorrection,
                         nextFrequencyCorrection
                     )) {
                         DegradeForRejectedFrequency(currentState);
@@ -1048,7 +1136,7 @@ namespace ESPressio::Clock {
 
             } else {
                 if (
-                    !newSameEraSource &&
+                    !newSameEraSource && !newCrossEraSource &&
                     _frequencyEvidence.Available &&
                     observationMonotonic > _frequencyEvidence.MonotonicNanoseconds &&
                     observationMonotonic - _frequencyEvidence.MonotonicNanoseconds >=
@@ -1065,10 +1153,13 @@ namespace ESPressio::Clock {
                         observationMonotonic - _frequencyEvidence.MonotonicNanoseconds;
                     const auto referenceDelta =
                         currentReference - _frequencyEvidence.ReferenceNanoseconds;
-                    if (!Detail::EstimateFrequencyCorrection(
+                    if (!Detail::EstimateFrequencyCorrectionFromBounds(
                         localDelta,
                         referenceDelta,
+                        _frequencyEvidence.ObservationUncertaintyNanoseconds,
+                        currentObservationUncertainty,
                         TMaximumFrequencyCorrectionPartsPerBillion,
+                        nextFrequencyCorrection,
                         nextFrequencyCorrection
                     )) {
                         DegradeForRejectedFrequency(currentState);
@@ -1088,7 +1179,8 @@ namespace ESPressio::Clock {
             nextState.ReferenceAnchorNanoseconds = observation.ReferenceTimestamp().Nanoseconds();
             nextState.FrequencyCorrectionPartsPerBillion = nextFrequencyCorrection;
             nextState.FrequencyUncertaintyPartsPerBillion =
-                newSameEraSource || currentState.RateEvidenceValid == 0U
+                (newSameEraSource || newCrossEraSource) ||
+                    currentState.RateEvidenceValid == 0U
                     ? TMaximumFrequencyCorrectionPartsPerBillion
                     : nextFrequencyUncertainty;
             nextState.UncertaintyAtAnchorNanoseconds = currentObservationUncertainty;
@@ -1097,7 +1189,7 @@ namespace ESPressio::Clock {
             nextState.RateEvidenceValid = 1U;
 
             if constexpr (TMinimumFrequencyEvidenceSpanNanoseconds != 0ULL) {
-                if (newSameEraSource) ResetFrequencyEvidence();
+                if (newSameEraSource || newCrossEraSource) ResetFrequencyEvidence();
                 if (!_frequencyEvidence.Available || completedFrequencyEvidenceSpan) {
                     _frequencyEvidence = FrequencyEvidenceBaseline{
                         observationMonotonic,
@@ -1155,7 +1247,8 @@ namespace ESPressio::Clock {
         SynchronizationObservationStatus Observe(
             const SynchronizationObservation& observation
         ) noexcept {
-            return ObserveInternal(observation,false);
+            return ObserveInternal(observation,false,false,
+                CrossEraTransitionMode::PreservePublishedTimeline);
         }
 
         /// Atomically adopts a same-era source's first accepted observation.
@@ -1167,7 +1260,19 @@ namespace ESPressio::Clock {
         SynchronizationObservationStatus ObserveFromNewSameEraSource(
             const SynchronizationObservation& observation
         ) noexcept {
-            return ObserveInternal(observation,true);
+            return ObserveInternal(observation,true,false,
+                CrossEraTransitionMode::PreservePublishedTimeline);
+        }
+
+        /// Atomically validate and commit the first observation of a
+        /// different era, applying its approved retention policy only when
+        /// the observation is accepted. Rejection leaves incumbent Clock
+        /// state and optional long-span frequency evidence untouched.
+        SynchronizationObservationStatus ObserveFromNewEraSource(
+            const SynchronizationObservation& observation,
+            CrossEraTransitionMode mode
+        ) noexcept {
+            return ObserveInternal(observation,false,true,mode);
         }
 
     };
