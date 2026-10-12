@@ -352,6 +352,42 @@ namespace {
             windowed.Correlation().FrequencyUncertaintyPartsPerBillion() <
             130000U
         );
+
+        // F04: a different parent within this SAME era is not a valid
+        // continuation of the five-second rate evidence of its predecessor.
+        timebase.Set(26'000'000'000ULL);
+        const auto priorToSameEraSwitch = windowed.Now();
+        assert(windowed.ObserveFromNewSameEraSource(
+            Observation(
+                26'000'000'000ULL,
+                26'000'000'000ULL + referenceOffset + 50'000'000ULL,
+                observationUncertainty
+            )
+        ) == SynchronizationObservationStatus::Accepted);
+        assert(windowed.Now().Timestamp().Nanoseconds() >=
+            priorToSameEraSwitch.Timestamp().Nanoseconds());
+        assert(
+            windowed.Correlation().FrequencyUncertaintyPartsPerBillion() >
+                130000U
+        );
+
+        // Every accepted phase sample remains usable, while the long-span
+        // estimator must build a genuinely fresh reference pair at >= 5s.
+        for (std::uint64_t second = 27U; second <= 31U; ++second) {
+            const auto local = second * 1000000000ULL;
+            timebase.Set(local);
+            assert(
+                windowed.Observe(Observation(
+                    local,
+                    local + referenceOffset + 50'000'000ULL,
+                    observationUncertainty
+                )) == SynchronizationObservationStatus::Accepted
+            );
+        }
+        assert(
+            windowed.Correlation().FrequencyUncertaintyPartsPerBillion() <
+                130000U
+        );
     }
 
 } // anonymous namespace
@@ -725,6 +761,55 @@ int main() {
         ) == SynchronizationObservationStatus::Accepted
     );
     assert(sameEraClock.Now().State() == SynchronizationState::Synchronized);
+
+    // F04: two legitimate parents sharing an era may differ in phase.
+    // An adjacent rate estimator must NOT interpret the phase change as
+    // oscillator drift. Rejected tentative adoption must not change the
+    // incumbent's published Clock state or its rate evidence.
+    TestTimebase f04Timebase;
+    MonotonicClock f04Monotonic(f04Timebase);
+    SynchronizedClock f04Clock(f04Monotonic);
+    f04Timebase.Set(1'000'000'000ULL);
+    assert(f04Clock.Observe(Observation(
+        1'000'000'000ULL,9'000'000'000ULL,0U
+    )) == SynchronizationObservationStatus::Accepted);
+    f04Timebase.Set(2'000'000'000ULL);
+    assert(f04Clock.Observe(Observation(
+        2'000'000'000ULL,10'000'000'000ULL,0U
+    )) == SynchronizationObservationStatus::Accepted);
+    f04Timebase.Set(3'000'000'000ULL);
+    const auto f04Prior = f04Clock.Now();
+    assert(f04Clock.Observe(Observation(
+        3'000'000'000ULL,11'050'000'000ULL,0U
+    )) == SynchronizationObservationStatus::RejectedFrequencyCorrection);
+    // Fresh source, same era: an unrelated 50ms phase is not 50,000ppm drift.
+    assert(f04Clock.ObserveFromNewSameEraSource(Observation(
+        3'000'000'001ULL,11'050'000'001ULL,0U
+    )) == SynchronizationObservationStatus::RejectedFutureObservation);
+    assert(f04Clock.Now().Timestamp().Nanoseconds() ==
+        f04Prior.Timestamp().Nanoseconds());
+    assert(f04Clock.ObserveFromNewSameEraSource(Observation(
+        3'000'000'000ULL,11'050'000'000ULL,0U
+    )) == SynchronizationObservationStatus::Accepted);
+    assert(f04Clock.Now().Timestamp().Nanoseconds() >=
+        f04Prior.Timestamp().Nanoseconds());
+    f04Timebase.Set(4'000'000'000ULL);
+    assert(f04Clock.Observe(Observation(
+        4'000'000'000ULL,12'050'000'000ULL,0U
+    )) == SynchronizationObservationStatus::Accepted);
+
+    // Explicit parent loss (before a new candidate is known) must also
+    // invalidate the adjacent rate pair while retaining the correlation.
+    f04Timebase.Set(5'000'000'000ULL);
+    const auto beforeParentLoss = f04Clock.Now();
+    assert(f04Clock.BeginSameEraTransition() ==
+        ClockDisciplineTransitionStatus::Applied);
+    assert(f04Clock.Correlation().IsAvailable());
+    assert(f04Clock.Now().Timestamp().Nanoseconds() ==
+        beforeParentLoss.Timestamp().Nanoseconds());
+    assert(f04Clock.Observe(Observation(
+        5'000'000'000ULL,13'100'000'000ULL,0U
+    )) == SynchronizationObservationStatus::Accepted);
 
     // Cross-era preservation invalidates old reference correlation while keeping the public clock
     // non-regressing, even when the new era starts behind the previously published coordinate.
