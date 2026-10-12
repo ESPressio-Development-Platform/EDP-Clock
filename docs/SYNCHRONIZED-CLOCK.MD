@@ -747,3 +747,36 @@ Host regressions cover a perfect local oscillator, two legitimate same-era
 parents with 50ms phase offset, rejected prospective adoption, unchanged
 parent, adjacent and five-second frequency baselines, and public continuity.
 These host tests do not establish on-air submillisecond accuracy.
+
+## H318 — bounded-noise frequency discipline and prospective era adoption
+
+The rate estimated from consecutive accepted reference coordinates is a
+*difference of noisy phase observations*, not an oscillator-only measurement.
+The F03 correction uses the sum of the two declared observation uncertainties
+as an explicit interval of uncertainty on their difference. An apparent rate
+whose entire excess is explainable by that interval cannot drive a new
+oscillator-frequency correction or cause a false out-of-bounds rate rejection.
+When measurable drift clearly exceeds the interval, the confidently
+attributable residual is used; negligible-uncertainty observations preserve
+the original exact rate calculation. Frequency uncertainty is still computed
+and propagated with time. This is not statistical outlier rejection when the
+supplied bounds themselves are wrong, and it does not qualify radio accuracy.
+
+For F08, ObserveFromNewEraSource(observation,mode) stages the approved
+PreservePublishedTimeline or ReconstructTimeline mapping in local writer
+memory, retaining the incumbent Clock until all observation preconditions
+and discipline checks succeed. A prospective rejection retains both the
+incumbent published mapping and optional long-span rate history. Even a
+different era cannot reverse the underlying physical monotonic timeline.
+Successful new-era adoption commits only after acceptance, preserving public
+timeline continuity or reconstructing it as explicitly authorised.
+The existing BeginCrossEraTransition() remains for explicit parent-loss
+policies, not prospective adoption.
+
+A preserved-era candidate may have been captured before the current
+writer's acceptance moment. The provisional old-era hold point is therefore
+projected at the current monotonic **commit** instant, not the potentially
+earlier candidate occurrence: otherwise discarding a positive incumbent
+rate correction over the handoff interval can make public Now regress.
+The H318 regression captures at 3 s, accepts at 4 s after a nonzero
+incumbent correction, and requires no backward published-time step.
