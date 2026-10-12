@@ -714,3 +714,36 @@ stable over the chosen window. Longer windows can under-model transient
 drift: qualification against independent measured clock deviation remains
 mandatory, and the unchanged strict 1ms ceiling must never be weakened.
 Long radio interruptions can still cause genuine Holdover.
+
+## H317 — Same-era parent adoption and frequency provenance
+
+An observation from a different parent in the same era must not be fed to
+ordinary Observe(), because the previously accepted reference timestamp
+belongs to a different source. The resulting pair may produce an apparent
+oscillator rate change even if local monotonic time is perfect.
+
+ObserveFromNewSameEraSource(observation) is the transactional first
+new-parent observation operation. It checks the ordinary Clock timestamp
+preconditions and, only when accepted, clears old-source long-span rate
+baseline and skips the old adjacent-observation rate pair. Initial new-source
+rate correction is neutral and uncertainty conservatively unresolved.
+The accepted new observation becomes the baseline for subsequent samples,
+in either adjacent or long-span mode. Failed new-parent candidates leave the
+incumbent mapping and previous frequency evidence untouched.
+
+BeginSameEraTransition() is still the explicit parent-loss operation when
+no accepted replacement exists. It invalidates separate RateEvidenceValid
+and optional long-span writer evidence, without removing the existing
+HasObservation/published correlation. These are distinct contracts.
+Consumers continue to project capture timestamps using the existing
+correlation, but later observations must not use the lost parent's rate pair.
+
+SynchronizedClockState remains exactly 48 bytes; the rate-validity flag
+reuses the formerly reserved byte. A successful parent switch does not step
+the published synchronized coordinate; the old timeline is projected and
+the new phase difference is resolved by bounded slew/uncertainty.
+
+Host regressions cover a perfect local oscillator, two legitimate same-era
+parents with 50ms phase offset, rejected prospective adoption, unchanged
+parent, adjacent and five-second frequency baselines, and public continuity.
+These host tests do not establish on-air submillisecond accuracy.
